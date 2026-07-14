@@ -1,0 +1,88 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                String    @id @default(uuid())
+  email             String    @unique
+  passwordHash      String
+  name              String
+  resumeText        String    @default("")
+  targetRole        String?
+  preferredLanguage String    @default("hinglish")
+  plan              String    @default("free")
+  weakTopics        String[]  @default([])
+  strongTopics      String[]  @default([])
+  sessions          Session[]
+  createdAt         DateTime  @default(now())
+}
+
+model Session {
+  id               String     @id @default(uuid())
+  userId           String
+  user             User       @relation(fields: [userId], references: [id])
+  companyStyle     String
+  jdText           String?
+  mode             String
+  roleCurriculum   String?
+  plannedCount     Int        @default(8)
+  difficulty       String     @default("medium")
+  practicePack     String?
+  interviewLanguage String    @default("english")
+  coveredTopics    String[]   @default([])
+  currentQuestion  String?
+  currentIsFollowUp Boolean   @default(false)
+  questions        Question[]
+  overallScore     Float?
+  hiringVerdict    String?
+  shareToken       String?    @unique
+  createdAt        DateTime   @default(now())
+}
+
+model CurriculumCache {
+  id         String   @id @default(uuid())
+  cacheKey   String   @unique
+  curriculum String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model Question {
+  id                 String   @id @default(uuid())
+  sessionId          String
+  session            Session  @relation(fields: [sessionId], references: [id])
+  questionText       String
+  userAnswer         String
+  idealAnswer        String
+  improvedAnswer     String   @default("")
+  missingPoints      String[]
+  topicTags          String[]
+  technicalScore     Float
+  communicationScore Float
+  depthScore         Float
+  structureScore     Float
+  starSituation      Float?
+  starTask           Float?
+  starAction         Float?
+  starResult         Float?
+  fillerWordCount    Int?
+  wordCount          Int?
+  speakingSeconds    Float?
+  wordsPerMinute     Float?
+  isFollowUp         Boolean  @default(false)
+  feedback           String
+  studyTips          String[] @default([])
+  conceptExplanation String    @default("")
+  createdAt          DateTime @default(now())
+}
+
+model CompanyStyle {
+  id         String @id @default(uuid())
+  name       String @unique
+  styleNotes String
+}

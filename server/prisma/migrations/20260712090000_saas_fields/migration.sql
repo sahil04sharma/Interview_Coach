@@ -1,0 +1,4 @@
+ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "preferredLanguage" TEXT NOT NULL DEFAULT 'hinglish';
+ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "plan" TEXT NOT NULL DEFAULT 'free';
+ALTER TABLE "Session" ADD COLUMN IF NOT EXISTS "shareToken" TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS "Session_shareToken_key" ON "Session"("shareToken");

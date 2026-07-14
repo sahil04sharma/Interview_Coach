@@ -1,0 +1,260 @@
+@import url('https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=Sora:wght@400;500;600;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-display: "Syne", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Sora", ui-sans-serif, system-ui, sans-serif;
+
+  /* Rehearsal booth palette */
+  --color-stage: #12161c;
+  --color-booth: #1c222b;
+  --color-booth-raised: #222a35;
+  --color-amber: #e8a54b;
+  --color-amber-deep: #cf8a30;
+  --color-lamp: #f3d7a5;
+  --color-ink: #eef1f4;
+  --color-muted: #a8b0bc;
+  --color-faint: #6f7986;
+  --color-line: #2a323e;
+  --color-danger: #e08a7a;
+  --color-ok: #7fd2ac;
+
+  /* Aliases kept so out-of-scope screens inherit the new theme without breaking */
+  --color-leaf: #e8a54b;
+  --color-leaf-deep: #cf8a30;
+  --color-mist: #222a35;
+  --color-fog: #1c222b;
+  --color-sand: #222a35;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  background:
+    radial-gradient(1100px 620px at 50% -8%, rgba(232, 165, 75, 0.16) 0%, transparent 60%),
+    radial-gradient(900px 700px at 85% 15%, rgba(232, 165, 75, 0.06) 0%, transparent 55%),
+    linear-gradient(180deg, #12161c 0%, #10141a 55%, #0d1116 100%);
+  background-attachment: fixed;
+}
+
+/* Faint booth grain */
+body::before {
+  content: "";
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  opacity: 0.04;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  z-index: 0;
+}
+
+#root {
+  position: relative;
+  z-index: 1;
+  min-height: 100vh;
+}
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes soft-pulse {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 1; }
+}
+
+@keyframes spotlight-in {
+  from {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.animate-rise {
+  animation: rise-in 0.55s ease-out both;
+}
+
+.animate-rise-delay {
+  animation: rise-in 0.7s ease-out 0.08s both;
+}
+
+.animate-spotlight {
+  animation: spotlight-in 1.1s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-rise,
+  .animate-rise-delay,
+  .animate-spotlight {
+    animation: none;
+  }
+  html {
+    scroll-behavior: auto;
+  }
+}
+
+@media print {
+  body {
+    background: white !important;
+    color: #111 !important;
+  }
+  body::before {
+    display: none !important;
+  }
+  .print\:hidden {
+    display: none !important;
+  }
+  .glass-panel {
+    background: white !important;
+    color: #111 !important;
+    box-shadow: none !important;
+    border-color: #ddd !important;
+  }
+}
+
+.font-display {
+  font-family: var(--font-display);
+  letter-spacing: -0.01em;
+}
+
+/* Booth panel (kept class name so existing screens restyle automatically) */
+.glass-panel {
+  background: linear-gradient(180deg, var(--color-booth-raised) 0%, var(--color-booth) 100%);
+  border: 1px solid var(--color-line);
+  box-shadow:
+    0 24px 48px -30px rgba(0, 0, 0, 0.75),
+    inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+/* Spotlight amber CTA */
+.btn-primary {
+  background: linear-gradient(180deg, var(--color-amber) 0%, var(--color-amber-deep) 100%);
+  color: #1a1206;
+  transition: transform 0.18s ease, box-shadow 0.18s ease, filter 0.18s ease;
+  box-shadow: 0 12px 28px -14px rgba(232, 165, 75, 0.7);
+}
+
+.btn-primary:hover:not(:disabled) {
+  transform: translateY(-1px);
+  filter: brightness(1.06);
+}
+
+.btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-ghost {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--color-line);
+  color: var(--color-ink);
+  transition: background 0.18s ease, border-color 0.18s ease;
+}
+
+.btn-ghost:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.07);
+  border-color: color-mix(in srgb, var(--color-amber) 45%, var(--color-line));
+}
+
+.btn-ghost:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.field-input {
+  width: 100%;
+  border-radius: 0.75rem;
+  border: 1px solid var(--color-line);
+  background: rgba(0, 0, 0, 0.22);
+  padding: 0.7rem 0.9rem;
+  color: var(--color-ink);
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.field-input::placeholder {
+  color: var(--color-faint);
+}
+
+.field-input:focus {
+  border-color: color-mix(in srgb, var(--color-amber) 60%, var(--color-line));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-amber) 22%, transparent);
+}
+
+.field-input option {
+  background: var(--color-booth);
+  color: var(--color-ink);
+}
+
+.nav-link {
+  position: relative;
+  color: var(--color-muted);
+  transition: color 0.15s ease;
+}
+
+.nav-link:hover,
+.nav-link.active {
+  color: var(--color-ink);
+}
+
+.nav-link.active::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -0.55rem;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--color-amber);
+  box-shadow: 0 0 12px rgba(232, 165, 75, 0.6);
+}
+
+/* Visible keyboard focus on the dark stage */
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--color-amber);
+  outline-offset: 2px;
+}
+
+.loading-dot {
+  animation: soft-pulse 1.2s ease-in-out infinite;
+}
+
+/* Ambient spotlight cone behind the hero brand */
+.spotlight-cone {
+  position: absolute;
+  left: 50%;
+  top: -18%;
+  width: min(120vw, 900px);
+  height: 720px;
+  transform: translateX(-50%);
+  pointer-events: none;
+  background:
+    radial-gradient(closest-side, rgba(243, 215, 165, 0.28) 0%, rgba(232, 165, 75, 0.12) 45%, transparent 75%);
+  filter: blur(6px);
+  z-index: 0;
+}
