@@ -62,7 +62,7 @@ export default function Settings() {
   if (loading) return <Loading label="Loading settings…" />;
 
   return (
-    <Page>
+    <Page className="mx-auto max-w-xl">
       <PageHeader
         eyebrow="Account"
         title="Settings"

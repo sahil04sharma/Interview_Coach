@@ -11,7 +11,9 @@ import {
   Panel,
   ScoreGrid,
 } from '../components/ui.jsx';
-import { canUseSpeechSynthesis, recordAudioChunk, speakText, stopSpeaking } from '../voice.js';
+import { VoicePlayer } from '../components/VoicePlayer.jsx';
+import { useVoice } from '../hooks/useVoice.js';
+import { recordAudioChunk } from '../voice.js';
 
 function StarRow({ label, value }) {
   if (value == null) return null;
@@ -59,6 +61,20 @@ export default function Interview() {
   const [retryActive, setRetryActive] = useState(false);
   const recorderRef = useRef(null);
   const answerStartedAt = useRef(Date.now());
+  const {
+    speaking: emmaSpeaking,
+    spokenText,
+    sentences,
+    activeSentenceIndex,
+    error: voiceError,
+    playQuestion,
+    playFeedback,
+    stop: stopVoice,
+  } = useVoice({ language: interviewLanguage });
+
+  useEffect(() => {
+    setSpeaking(emmaSpeaking);
+  }, [emmaSpeaking]);
 
   useEffect(() => {
     if (phase !== 'answering') return;
@@ -115,41 +131,37 @@ export default function Interview() {
   useEffect(() => {
     if (!voiceMode || !question || phase !== 'answering' || submitting || finishing) return;
 
-    const controller = new AbortController();
-    // Delay start so React Strict Mode remount does not cancel speech before it begins.
+    let cancelled = false;
     const timer = setTimeout(() => {
       (async () => {
         try {
-          setSpeaking(true);
           setError('');
-          setVoiceStatus(isFollowUp ? 'Follow-up…' : 'Interviewer is speaking…');
-          await speakText(question, { language: interviewLanguage, signal: controller.signal });
-          if (!controller.signal.aborted) {
+          setVoiceStatus(isFollowUp ? 'Follow-up…' : 'Emma is speaking…');
+          await playQuestion(question, interviewLanguage);
+          if (!cancelled) {
             setVoiceStatus('Your turn — tap Record answer when ready.');
           }
         } catch {
-          if (!controller.signal.aborted) {
+          if (!cancelled) {
             setVoiceStatus('Could not speak this question. You can still read and answer.');
           }
-        } finally {
-          if (!controller.signal.aborted) setSpeaking(false);
         }
       })();
-    }, 200);
+    }, 220);
 
     return () => {
+      cancelled = true;
       clearTimeout(timer);
-      controller.abort();
-      stopSpeaking();
+      stopVoice();
     };
-  }, [question, voiceMode, isFollowUp, interviewLanguage, phase, submitting, finishing]);
+  }, [question, voiceMode, isFollowUp, interviewLanguage, phase, submitting, finishing, playQuestion, stopVoice]);
 
   useEffect(() => {
     return () => {
-      stopSpeaking();
+      stopVoice();
       recorderRef.current?.stop?.();
     };
-  }, []);
+  }, [stopVoice]);
 
   async function finishAndReport() {
     const report = await api.finishSession(id);
@@ -158,7 +170,7 @@ export default function Interview() {
 
   async function submitAnswer({ isRetry = false } = {}) {
     if (!question.trim() || !answer.trim()) return;
-    stopSpeaking();
+    stopVoice();
     setSubmitting(true);
     setError('');
     setStatusMessage(isRetry ? 'Re-scoring your improved answer…' : 'Evaluating your answer…');
@@ -217,9 +229,7 @@ export default function Interview() {
 
       if (voiceMode && result.lastEvaluation?.feedback) {
         try {
-          await speakText(`Feedback. ${result.lastEvaluation.feedback}`, {
-            language: interviewLanguage,
-          });
+          await playFeedback(result.lastEvaluation.feedback, interviewLanguage);
         } catch {
           // ignore
         }
@@ -233,7 +243,7 @@ export default function Interview() {
   }
 
   function onRetry() {
-    stopSpeaking();
+    stopVoice();
     setPhase('answering');
     setEvaluation(null);
     setPendingNext(null);
@@ -248,7 +258,7 @@ export default function Interview() {
 
   async function onNextQuestion() {
     if (!pendingNext) return;
-    stopSpeaking();
+    stopVoice();
 
     if (pendingNext.sessionComplete) {
       setFinishing(true);
@@ -276,7 +286,7 @@ export default function Interview() {
   }
 
   async function onFinish() {
-    stopSpeaking();
+    stopVoice();
     recorderRef.current?.stop?.();
     setFinishing(true);
     setError('');
@@ -306,14 +316,11 @@ export default function Interview() {
     if (!question || phase !== 'answering') return;
     try {
       setError('');
-      setSpeaking(true);
-      setVoiceStatus('Interviewer is speaking…');
-      await speakText(question, { language: interviewLanguage });
+      setVoiceStatus('Emma is speaking…');
+      await playQuestion(question, interviewLanguage);
       setVoiceStatus('Your turn — tap Record answer when ready.');
     } catch {
       setVoiceStatus('Could not speak this question. You can still read and answer.');
-    } finally {
-      setSpeaking(false);
     }
   }
 
@@ -396,7 +403,7 @@ export default function Interview() {
             <Button
               variant="ghost"
               onClick={() => {
-                stopSpeaking();
+                stopVoice();
                 setVoiceMode((v) => !v);
               }}
             >
@@ -409,113 +416,201 @@ export default function Interview() {
         }
       />
 
-      {voiceMode && phase === 'answering' && (
-        <Panel className="space-y-3">
-          <p className="text-sm text-[var(--color-muted)]">
-            {voiceStatus ||
-              (canUseSpeechSynthesis()
-                ? 'Soft girl interviewer voice on — calm and clear.'
-                : 'This browser cannot speak questions aloud, but you can still record answers.')}
-          </p>
-          <div className="flex flex-wrap gap-2">
-            <Button variant="ghost" onClick={speakQuestionAgain} disabled={speaking || listening || submitting}>
-              {speaking ? 'Speaking…' : 'Replay question'}
-            </Button>
-            <Button onClick={toggleRecording} disabled={speaking || transcribing || submitting || isCoding}>
-              {listening ? 'Stop recording' : transcribing ? 'Transcribing…' : 'Record answer'}
-            </Button>
-            {listening && (
-              <span className="inline-flex items-center gap-2 text-sm font-medium text-[var(--color-danger)]">
-                <span className="loading-dot h-2.5 w-2.5 rounded-full bg-[var(--color-danger)]" />
-                Listening
-              </span>
-            )}
-          </div>
-        </Panel>
-      )}
-
-      <Panel className="animate-rise space-y-5">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--color-leaf)]">
-            {isFollowUp ? 'Follow-up' : 'Question'}
-          </p>
-          <p className="mt-3 whitespace-pre-wrap font-display text-xl leading-snug text-[var(--color-ink)] sm:text-2xl">
-            {displayQuestion}
-          </p>
-        </div>
-
-        {phase === 'answering' && (
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              submitAnswer({ isRetry: retryActive });
-            }}
-            className="space-y-4"
-          >
-            <Field
-              label={
-                isCoding
-                  ? 'Your solution (JavaScript)'
-                  : voiceMode
-                    ? 'Your answer (editable transcript)'
-                    : 'Your answer'
-              }
-            >
-              <textarea
-                className={`field-input min-h-44 text-sm ${isCoding ? 'font-mono' : ''}`}
-                value={answer}
-                onChange={(e) => setAnswer(e.target.value)}
-                placeholder={
-                  isCoding
-                    ? '// Write your solution…'
-                    : voiceMode
-                      ? 'Record your answer, or type here…'
-                      : 'Type your answer…'
-                }
-                required
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1.4fr)_minmax(280px,0.85fr)] lg:items-start">
+        <div className="space-y-4">
+          {voiceMode && phase === 'answering' && (
+            <Panel className="space-y-3">
+              <VoicePlayer
+                speaking={speaking}
+                status={voiceStatus}
+                spokenText={spokenText}
+                sentences={sentences}
+                activeSentenceIndex={activeSentenceIndex}
+                error={voiceError}
+                onReplay={speakQuestionAgain}
+                onRecord={toggleRecording}
+                listening={listening}
+                transcribing={transcribing}
+                replayDisabled={listening || submitting}
+                recordDisabled={submitting || isCoding}
               />
-            </Field>
+            </Panel>
+          )}
 
-            <div className="flex flex-wrap gap-3">
-              {isCoding && (
-                <Button type="button" variant="ghost" onClick={onRunCode} disabled={running || !answer.trim()}>
-                  {running ? 'Running…' : 'Run code'}
-                </Button>
-              )}
-              <Button type="submit" disabled={submitting || !answer.trim() || listening || transcribing}>
-                {submitting ? 'Evaluating…' : retryActive ? 'Resubmit improved answer' : 'Submit answer'}
-              </Button>
-            </div>
-
-            {runOutput && (
-              <div className="rounded-xl bg-[var(--color-ink)] p-4 font-mono text-xs text-[var(--color-fog)]">
-                {runOutput.error ? (
-                  <pre className="whitespace-pre-wrap text-red-300">{runOutput.error}</pre>
-                ) : (
-                  <>
-                    {runOutput.stdout && (
-                      <pre className="mb-2 whitespace-pre-wrap opacity-90">{runOutput.stdout}</pre>
-                    )}
-                    <pre className="whitespace-pre-wrap">{runOutput.result ?? '(no return value)'}</pre>
-                  </>
-                )}
-              </div>
-            )}
-
-            {submitting && <Loading label={statusMessage || 'Scoring content, STAR, and delivery…'} />}
-          </form>
-        )}
-
-        {showingFeedback && (
-          <div className="space-y-4">
+          <Panel className="animate-rise space-y-5">
             <div>
-              <p className="text-sm font-semibold">Your answer</p>
-              <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-[var(--color-muted)]">
-                {submittedAnswer}
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--color-leaf)]">
+                {isFollowUp ? 'Follow-up' : 'Question'}
+              </p>
+              <p className="mt-3 whitespace-pre-wrap font-display text-xl leading-snug text-[var(--color-ink)] sm:text-2xl">
+                {displayQuestion}
               </p>
             </div>
 
-            <div className="border-t border-[var(--color-line)] pt-4 space-y-4">
+            {phase === 'answering' && (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  submitAnswer({ isRetry: retryActive });
+                }}
+                className="space-y-4"
+              >
+                <Field
+                  label={
+                    isCoding
+                      ? 'Your solution (JavaScript)'
+                      : voiceMode
+                        ? 'Your answer (editable transcript)'
+                        : 'Your answer'
+                  }
+                >
+                  <textarea
+                    className={`field-input min-h-44 text-sm ${isCoding ? 'font-mono' : ''}`}
+                    value={answer}
+                    onChange={(e) => setAnswer(e.target.value)}
+                    placeholder={
+                      isCoding
+                        ? '// Write your solution…'
+                        : voiceMode
+                          ? 'Record your answer, or type here…'
+                          : 'Type your answer…'
+                    }
+                    required
+                  />
+                </Field>
+
+                <div className="flex flex-wrap gap-3">
+                  {isCoding && (
+                    <Button type="button" variant="ghost" onClick={onRunCode} disabled={running || !answer.trim()}>
+                      {running ? 'Running…' : 'Run code'}
+                    </Button>
+                  )}
+                  <Button type="submit" disabled={submitting || !answer.trim() || listening || transcribing}>
+                    {submitting ? 'Evaluating…' : retryActive ? 'Resubmit improved answer' : 'Submit answer'}
+                  </Button>
+                </div>
+
+                {runOutput && (
+                  <div className="rounded-xl bg-[var(--color-ink)] p-4 font-mono text-xs text-[var(--color-fog)]">
+                    {runOutput.error ? (
+                      <pre className="whitespace-pre-wrap text-red-300">{runOutput.error}</pre>
+                    ) : (
+                      <>
+                        {runOutput.stdout && (
+                          <pre className="mb-2 whitespace-pre-wrap opacity-90">{runOutput.stdout}</pre>
+                        )}
+                        <pre className="whitespace-pre-wrap">{runOutput.result ?? '(no return value)'}</pre>
+                      </>
+                    )}
+                  </div>
+                )}
+
+                {submitting && <Loading label={statusMessage || 'Scoring content, STAR, and delivery…'} />}
+              </form>
+            )}
+
+            {showingFeedback && (
+              <div className="space-y-4">
+                <div>
+                  <p className="text-sm font-semibold">Your answer</p>
+                  <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-[var(--color-muted)]">
+                    {submittedAnswer}
+                  </p>
+                </div>
+
+                {evaluation.improvedAnswer && (
+                  <div>
+                    <p className="text-sm font-semibold">Stronger version of your answer</p>
+                    <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-[var(--color-muted)]">
+                      {evaluation.improvedAnswer}
+                    </p>
+                  </div>
+                )}
+                {evaluation.idealAnswer && (
+                  <div>
+                    <button
+                      type="button"
+                      className="text-sm font-semibold text-[var(--color-leaf-deep)] underline-offset-2 hover:underline"
+                      onClick={() => setShowIdeal((v) => !v)}
+                    >
+                      {showIdeal ? 'Hide full model interview answer' : 'Show full model interview answer'}
+                    </button>
+                    {showIdeal && (
+                      <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-[var(--color-muted)]">
+                        {evaluation.idealAnswer}
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                <div className="flex flex-wrap gap-3 pt-2">
+                  <Button onClick={onNextQuestion} disabled={finishing || (!pendingNext && submitting)}>
+                    {pendingNext?.sessionComplete
+                      ? finishing
+                        ? 'Opening report…'
+                        : 'See full report'
+                      : pendingNext?.isFollowUp
+                        ? 'Next: follow-up question'
+                        : 'Next question'}
+                  </Button>
+                  <Button variant="ghost" onClick={onRetry} disabled={finishing || submitting}>
+                    Try this question again
+                  </Button>
+                  <Button variant="ghost" onClick={onFinish} disabled={finishing}>
+                    Finish early
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {error && <Alert>{error}</Alert>}
+          </Panel>
+        </div>
+
+        <aside className="space-y-4 lg:sticky lg:top-6">
+          <Panel className="space-y-3">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--color-muted)]">
+              Session
+            </p>
+            <p className="font-display text-2xl font-semibold tabular-nums">
+              {showingFeedback
+                ? `${Math.min(answeredCount, plannedCount)} / ${plannedCount}`
+                : `${Math.min(answeredCount + 1, plannedCount)} / ${plannedCount}`}
+            </p>
+            <p className="text-sm text-[var(--color-muted)] capitalize">
+              {mode || 'interview'}
+              {isFollowUp ? ' · follow-up' : ''}
+              {voiceMode ? ' · voice' : ''}
+            </p>
+            <div className="h-2 overflow-hidden rounded-full bg-[var(--color-fog)]">
+              <div
+                className="h-full rounded-full bg-[var(--color-leaf)] transition-all duration-500"
+                style={{
+                  width: `${Math.min(
+                    100,
+                    (answeredCount / Math.max(1, plannedCount)) * 100,
+                  )}%`,
+                }}
+              />
+            </div>
+          </Panel>
+
+          {phase === 'answering' && (
+            <Panel className="space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--color-leaf)]">
+                Tips
+              </p>
+              <ul className="list-disc space-y-1.5 pl-4 text-sm leading-relaxed text-[var(--color-muted)]">
+                <li>Answer like you would with a real interviewer — clear structure beats length.</li>
+                <li>Name trade-offs and edge cases when you can.</li>
+                {isCoding && <li>Run your code before submit if you want a quick sanity check.</li>}
+                {voiceMode && <li>You can edit the transcript after recording.</li>}
+              </ul>
+            </Panel>
+          )}
+
+          {showingFeedback && (
+            <Panel className="space-y-4">
               <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--color-muted)]">
                 Feedback
               </p>
@@ -556,6 +651,53 @@ export default function Interview() {
                   </ul>
                 </div>
               )}
+              {(evaluation.conceptsCorrect?.length > 0 ||
+                evaluation.conceptsPartial?.length > 0 ||
+                evaluation.conceptsIncorrect?.length > 0 ||
+                evaluation.knowledgeGaps?.length > 0) && (
+                <div className="grid gap-3">
+                  {evaluation.conceptsCorrect?.length > 0 && (
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-ok)]">
+                        Concepts correct
+                      </p>
+                      <p className="mt-1 text-sm text-[var(--color-muted)]">
+                        {evaluation.conceptsCorrect.join(', ')}
+                      </p>
+                    </div>
+                  )}
+                  {evaluation.conceptsPartial?.length > 0 && (
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-amber)]">
+                        Partially correct
+                      </p>
+                      <p className="mt-1 text-sm text-[var(--color-muted)]">
+                        {evaluation.conceptsPartial.join(', ')}
+                      </p>
+                    </div>
+                  )}
+                  {evaluation.conceptsIncorrect?.length > 0 && (
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-danger)]">
+                        Incorrect
+                      </p>
+                      <p className="mt-1 text-sm text-[var(--color-muted)]">
+                        {evaluation.conceptsIncorrect.join(', ')}
+                      </p>
+                    </div>
+                  )}
+                  {evaluation.knowledgeGaps?.length > 0 && (
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-muted)]">
+                        Knowledge gaps
+                      </p>
+                      <p className="mt-1 text-sm text-[var(--color-muted)]">
+                        {evaluation.knowledgeGaps.join(', ')}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
               {evaluation.conceptExplanation && (
                 <div className="rounded-xl bg-[var(--color-fog)] p-4">
                   <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--color-leaf)]">
@@ -564,30 +706,6 @@ export default function Interview() {
                   <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-[var(--color-ink)]">
                     {evaluation.conceptExplanation}
                   </p>
-                </div>
-              )}
-              {evaluation.improvedAnswer && (
-                <div>
-                  <p className="text-sm font-semibold">Stronger version of your answer</p>
-                  <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-[var(--color-muted)]">
-                    {evaluation.improvedAnswer}
-                  </p>
-                </div>
-              )}
-              {evaluation.idealAnswer && (
-                <div>
-                  <button
-                    type="button"
-                    className="text-sm font-semibold text-[var(--color-leaf-deep)] underline-offset-2 hover:underline"
-                    onClick={() => setShowIdeal((v) => !v)}
-                  >
-                    {showIdeal ? 'Hide full model interview answer' : 'Show full model interview answer'}
-                  </button>
-                  {showIdeal && (
-                    <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-[var(--color-muted)]">
-                      {evaluation.idealAnswer}
-                    </p>
-                  )}
                 </div>
               )}
               {evaluation.studyTips?.length > 0 && (
@@ -609,30 +727,10 @@ export default function Interview() {
               {statusMessage && submitting && (
                 <p className="text-xs text-[var(--color-muted)]">{statusMessage}</p>
               )}
-            </div>
-
-            <div className="flex flex-wrap gap-3 pt-2">
-              <Button onClick={onNextQuestion} disabled={finishing || (!pendingNext && submitting)}>
-                {pendingNext?.sessionComplete
-                  ? finishing
-                    ? 'Opening report…'
-                    : 'See full report'
-                  : pendingNext?.isFollowUp
-                    ? 'Next: follow-up question'
-                    : 'Next question'}
-              </Button>
-              <Button variant="ghost" onClick={onRetry} disabled={finishing || submitting}>
-                Try this question again
-              </Button>
-              <Button variant="ghost" onClick={onFinish} disabled={finishing}>
-                Finish early
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {error && <Alert>{error}</Alert>}
-      </Panel>
+            </Panel>
+          )}
+        </aside>
+      </div>
     </Page>
   );
 }

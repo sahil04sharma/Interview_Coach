@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "nodemon",
+    "dev": "node --watch src/index.js",
     "start": "node src/index.js",
     "db:migrate": "prisma migrate dev",
     "db:seed": "prisma db seed",

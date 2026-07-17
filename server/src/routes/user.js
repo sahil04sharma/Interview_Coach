@@ -130,20 +130,94 @@ router.get('/me/stats', async (req, res, next) => {
       }))
       .sort((a, b) => a.avgTechnical - b.avgTechnical);
 
+    const mastery = await prisma.userConceptMastery.findMany({
+      where: { userId: req.userId },
+      include: { concept: true },
+      orderBy: { updatedAt: 'desc' },
+    });
+
+    const weakMastery = mastery.filter((m) => m.status === 'weak' || m.status === 'learning');
+    const strongMastery = mastery.filter((m) => m.status === 'strong' || m.status === 'mastered');
+    const frequentlyFailed = [...mastery]
+      .sort((a, b) => b.incorrectCount - a.incorrectCount)
+      .filter((m) => m.incorrectCount > 0)
+      .slice(0, 10)
+      .map((m) => ({
+        name: m.concept.name,
+        slug: m.concept.slug,
+        incorrectCount: m.incorrectCount,
+        masteryScore: m.masteryScore,
+        status: m.status,
+      }));
+
+    const recentlyImproved = [...mastery]
+      .filter((m) => m.status === 'strong' || m.status === 'mastered' || m.status === 'learning')
+      .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))
+      .slice(0, 10)
+      .map((m) => ({
+        name: m.concept.name,
+        slug: m.concept.slug,
+        masteryScore: m.masteryScore,
+        status: m.status,
+        updatedAt: m.updatedAt,
+      }));
+
+    const finished = sessions.filter((s) => s.hiringVerdict);
+    const readinessScores = finished
+      .map((s) => s.readinessScore)
+      .filter((n) => n != null);
+    const avgReadiness = readinessScores.length
+      ? Math.round(
+          (readinessScores.reduce((a, b) => a + b, 0) / readinessScores.length) * 100,
+        ) / 100
+      : null;
+
+    const snapshots = await prisma.progressSnapshot.findMany({
+      where: { userId: req.userId },
+      orderBy: { createdAt: 'asc' },
+      take: 20,
+    });
+
     res.json({
       weakTopics: user.weakTopics,
       strongTopics: user.strongTopics,
       sessionCount: sessions.length,
-      finishedCount: sessions.filter((s) => s.hiringVerdict).length,
+      finishedCount: finished.length,
       answeredQuestions,
       averageScore: scoreCount ? Math.round((scoreSum / scoreCount) * 100) / 100 : null,
+      readinessScore: avgReadiness,
       topicStats: topics,
+      masterySummary: {
+        weakCount: weakMastery.length,
+        strongCount: strongMastery.length,
+        totalTracked: mastery.length,
+      },
+      frequentlyFailedConcepts: frequentlyFailed,
+      recentlyImprovedConcepts: recentlyImproved,
+      conceptMastery: mastery.slice(0, 40).map((m) => ({
+        name: m.concept.name,
+        slug: m.concept.slug,
+        domain: m.concept.domain,
+        masteryScore: m.masteryScore,
+        status: m.status,
+        attempts: m.attempts,
+      })),
+      snapshots: snapshots.map((s) => ({
+        accuracy: s.accuracy,
+        communication: s.communication,
+        readiness: s.readiness,
+        weakCount: s.weakCount,
+        strongCount: s.strongCount,
+        date: s.createdAt,
+      })),
       recentSessions: sessions.slice(0, 12).map((s) => ({
         id: s.id,
         companyStyle: s.companyStyle,
         mode: s.mode,
         overallScore: s.overallScore,
         hiringVerdict: s.hiringVerdict,
+        hireProbability: s.hireProbability,
+        readinessScore: s.readinessScore,
         createdAt: s.createdAt,
         questionCount: s.questions.length,
       })),
@@ -154,6 +228,7 @@ router.get('/me/stats', async (req, res, next) => {
         .map((s) => ({
           id: s.id,
           score: s.overallScore,
+          readiness: s.readinessScore,
           date: s.createdAt,
           label: s.companyStyle,
         })),
@@ -168,6 +243,25 @@ router.get('/me/stats', async (req, res, next) => {
           wordsPerMinute: avg('wordsPerMinute'),
           fillerWordCount: avg('fillerWordCount'),
           samples: withSpeech.length,
+        };
+      })(),
+      latestIntelligenceSession: await (async () => {
+        const latest = finished[0];
+        if (!latest) return null;
+        const [hypothesisCount, misconceptionCount] = await Promise.all([
+          prisma.hypothesis.count({ where: { sessionId: latest.id } }),
+          prisma.misconception.count({ where: { sessionId: latest.id } }),
+        ]);
+        if (hypothesisCount === 0 && misconceptionCount === 0 && !latest.reportAnalysis) {
+          return null;
+        }
+        return {
+          id: latest.id,
+          companyStyle: latest.companyStyle,
+          mode: latest.mode,
+          hiringVerdict: latest.hiringVerdict,
+          hypothesisCount,
+          misconceptionCount,
         };
       })(),
     });

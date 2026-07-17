@@ -7,7 +7,19 @@ router.get('/', async (_req, res, next) => {
   try {
     const styles = await prisma.companyStyle.findMany({
       orderBy: { name: 'asc' },
-      select: { id: true, name: true, styleNotes: true },
+      select: {
+        id: true,
+        name: true,
+        styleNotes: true,
+        philosophy: true,
+        difficulty: true,
+        followUpAggressiveness: true,
+        behavioralWeight: true,
+        codingWeight: true,
+        systemDesignWeight: true,
+        communicationExpect: true,
+        preferredAnswerStyle: true,
+      },
     });
 
     // Put general practice first — company targets are optional filters.

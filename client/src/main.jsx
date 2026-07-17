@@ -18,6 +18,8 @@ import SignIn from './screens/SignIn.jsx';
 import SignUp from './screens/SignUp.jsx';
 import History from './screens/History.jsx';
 import Progress from './screens/Progress.jsx';
+import Knowledge from './screens/Knowledge.jsx';
+import StudyPlan from './screens/StudyPlan.jsx';
 import { Button } from './components/ui.jsx';
 
 function MarketingChrome({ children }) {
@@ -28,10 +30,10 @@ function MarketingChrome({ children }) {
     <div className="min-h-screen">
       <header className="mx-auto flex max-w-5xl items-center justify-between px-4 py-6 sm:px-6">
         <Link to="/" className="group inline-flex items-center gap-2.5">
-          <span className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-[color-mix(in_srgb,var(--color-amber)_45%,var(--color-line))] bg-[color-mix(in_srgb,var(--color-amber)_16%,var(--color-booth))]">
-            <span className="h-2 w-2 rounded-full bg-[var(--color-amber)] shadow-[0_0_10px_var(--color-amber)]" />
+          <span className="inline-flex h-7 w-7 items-center justify-center rounded-[10px] border border-[var(--color-line)] bg-white">
+            <span className="h-2 w-2 rounded-full bg-[var(--color-amber)]" />
           </span>
-          <span className="font-display text-xl font-bold tracking-tight text-[var(--color-ink)]">
+          <span className="font-display text-xl font-semibold tracking-tight text-[var(--color-ink)]">
             Interview Grove
           </span>
         </Link>
@@ -58,7 +60,7 @@ function MarketingChrome({ children }) {
       {children}
       <footer className="mx-auto mt-10 max-w-5xl border-t border-[var(--color-line)] px-4 py-8 text-xs text-[var(--color-faint)] sm:px-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <p>© {new Date().getFullYear()} Interview Grove — rehearse before it counts.</p>
+          <p>© {new Date().getFullYear()} Interview Grove — become interview-ready.</p>
           <div className="flex gap-4">
             <Link to="/privacy" className="transition-colors hover:text-[var(--color-ink)]">
               Privacy
@@ -87,18 +89,18 @@ function AppChrome({ children }) {
   }
 
   return (
-    <div className="mx-auto min-h-screen max-w-3xl px-4 py-8 sm:px-6">
+    <div className="mx-auto min-h-screen max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
       <header className="animate-rise mb-10 flex flex-col gap-4 border-b border-[var(--color-line)] pb-5 sm:flex-row sm:items-center sm:justify-between">
         <Link to="/app" className="group inline-flex items-center gap-2.5">
-          <span className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-[color-mix(in_srgb,var(--color-amber)_45%,var(--color-line))] bg-[color-mix(in_srgb,var(--color-amber)_16%,var(--color-booth))]">
-            <span className="h-2 w-2 rounded-full bg-[var(--color-amber)] shadow-[0_0_10px_var(--color-amber)]" />
+          <span className="inline-flex h-7 w-7 items-center justify-center rounded-[10px] border border-[var(--color-line)] bg-white">
+            <span className="h-2 w-2 rounded-full bg-[var(--color-amber)]" />
           </span>
           <span>
-            <span className="block font-display text-xl font-bold tracking-tight text-[var(--color-ink)]">
+            <span className="block font-display text-xl font-semibold tracking-tight text-[var(--color-ink)]">
               Interview Grove
             </span>
             <span className="mt-0.5 block text-xs text-[var(--color-faint)]">
-              {user?.plan === 'pro' ? 'Pro booth' : 'Free booth'} · step in and rehearse
+              {user?.plan === 'pro' ? 'Pro' : 'Free'} · daily interview coaching
             </span>
           </span>
         </Link>
@@ -111,17 +113,17 @@ function AppChrome({ children }) {
               <NavLink to="/session/new" className={linkClass}>
                 Practice
               </NavLink>
-              <NavLink to="/history" className={linkClass}>
-                History
+              <NavLink to="/knowledge" className={linkClass}>
+                Knowledge
+              </NavLink>
+              <NavLink to="/study-plan" className={linkClass}>
+                Study
               </NavLink>
               <NavLink to="/progress" className={linkClass}>
                 Progress
               </NavLink>
               <NavLink to="/setup" className={linkClass}>
                 Profile
-              </NavLink>
-              <NavLink to="/settings" className={linkClass}>
-                Settings
               </NavLink>
               <Button variant="ghost" className="!py-1.5 !text-xs" onClick={onSignOut}>
                 Sign out
@@ -143,7 +145,9 @@ function Shell() {
     location.pathname.startsWith('/settings') ||
     location.pathname.startsWith('/session') ||
     location.pathname.startsWith('/history') ||
-    location.pathname.startsWith('/progress');
+    location.pathname.startsWith('/progress') ||
+    location.pathname.startsWith('/knowledge') ||
+    location.pathname.startsWith('/study-plan');
 
   const routes = (
     <Routes>
@@ -162,6 +166,9 @@ function Shell() {
       <Route path="/session/:id/report" element={<ProtectedRoute><Report /></ProtectedRoute>} />
       <Route path="/history" element={<ProtectedRoute><History /></ProtectedRoute>} />
       <Route path="/progress" element={<ProtectedRoute><Progress /></ProtectedRoute>} />
+      <Route path="/knowledge" element={<ProtectedRoute><Knowledge /></ProtectedRoute>} />
+      <Route path="/knowledge/:slug" element={<ProtectedRoute><Knowledge /></ProtectedRoute>} />
+      <Route path="/study-plan" element={<ProtectedRoute><StudyPlan /></ProtectedRoute>} />
     </Routes>
   );
 

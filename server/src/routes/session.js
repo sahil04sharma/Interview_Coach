@@ -2,17 +2,48 @@ import { Router } from 'express';
 import { randomBytes } from 'node:crypto';
 import { prisma } from '../db.js';
 import { requireAuth } from '../auth.js';
-import { chatCompletion, chatCompletionStream, chatJson } from '../llm.js';
+import { chatJson } from '../llm.js';
 import {
-  buildEvaluatorMessages,
-  buildInterviewerMessages,
   buildJdExtractMessages,
-  buildVerdictMessages,
 } from '../prompts.js';
 import { analyzeSpeechDelivery } from '../speech.js';
 import { assessAnswerQuality } from '../answerQuality.js';
-import { fallbackQuestion } from '../fallbackQuestions.js';
 import { getOrCreateCurriculum } from '../curriculumCache.js';
+import {
+  emptyMemory,
+  formatKnowledgeProfile,
+  readMemory,
+  updateMemoryAfterAnswer,
+} from '../services/interviewMemory.js';
+import {
+  applyEvaluationToKnowledge,
+  createProgressSnapshot,
+  getKnowledgeProfile,
+  syncUserTopicCaches,
+} from '../services/knowledgeService.js';
+import {
+  evaluationPayload,
+  normalizeEvaluation,
+  questionCreateData,
+  clampScore,
+} from '../services/evaluationService.js';
+import { generateStudyPlan } from '../services/studyPlanService.js';
+import {
+  evaluateAnswer,
+  persistEvaluationEvidence,
+  ensureCognitiveModel,
+  analyzeResumeAtStart,
+  isIntelligenceV2Enabled,
+} from '../intelligence/evaluateAnswer.js';
+import { generateNextQuestion } from '../intelligence/generateNextQuestion.js';
+import { persistMisconceptions } from '../intelligence/hypothesisEngine.js';
+import { applyBrainResult } from '../intelligence/applyBrainResult.js';
+import { generateSessionReport } from '../intelligence/generateSessionReport.js';
+import { loadCognitiveModel } from '../intelligence/cognitiveModel.js';
+import {
+  ensurePrimaryEnrollment,
+  isRoleCurriculumEnabled,
+} from '../intelligence/roleCurriculumService.js';
 
 const router = Router();
 const publicRouter = Router();
@@ -26,17 +57,6 @@ const VALID_PACKS = new Set(['mixed', 'behavioral_star', 'fundamentals', 'tricks
 const VALID_LANGUAGES = new Set(['english', 'hinglish', 'hindi']);
 
 router.use(requireAuth);
-
-function clampScore(value) {
-  const n = Number(value);
-  if (Number.isNaN(n)) return 0;
-  return Math.max(0, Math.min(10, n));
-}
-
-function optionalScore(value) {
-  if (value === null || value === undefined || value === '') return null;
-  return clampScore(value);
-}
 
 function averageScores(questions) {
   if (!questions.length) return 0;
@@ -71,6 +91,20 @@ function writeNdjson(res, obj) {
   res.write(`${JSON.stringify(obj)}\n`);
 }
 
+function companyProfile(company) {
+  if (!company) return null;
+  return {
+    philosophy: company.philosophy,
+    difficulty: company.difficulty,
+    followUpAggressiveness: company.followUpAggressiveness,
+    behavioralWeight: company.behavioralWeight,
+    codingWeight: company.codingWeight,
+    systemDesignWeight: company.systemDesignWeight,
+    communicationExpect: company.communicationExpect,
+    preferredAnswerStyle: company.preferredAnswerStyle,
+  };
+}
+
 function interviewerArgs({
   session,
   company,
@@ -79,7 +113,10 @@ function interviewerArgs({
   jdContext = null,
   forcedFollowUp = null,
   lastEvaluation = null,
+  memory = null,
+  knowledgeProfile = null,
 }) {
+  const mem = memory || readMemory(session);
   return {
     companyName: company.name,
     styleNotes: company.styleNotes,
@@ -93,72 +130,17 @@ function interviewerArgs({
     jdContext,
     roleCurriculum: parseCurriculum(session.roleCurriculum),
     questionIndex: previousQuestions.length,
-    difficulty: session.difficulty || 'medium',
+    difficulty: mem.difficulty || session.difficulty || 'medium',
     practicePack: session.practicePack || 'mixed',
     interviewLanguage: session.interviewLanguage || 'english',
     forcedFollowUp,
     lastEvaluation,
-    coveredTopics: session.coveredTopics || [],
+    coveredTopics: mem.topicsCovered?.length ? mem.topicsCovered : session.coveredTopics || [],
     focusWeakTopics: user.weakTopics,
+    memory: mem,
+    knowledgeProfile,
+    companyProfile: companyProfile(company),
   };
-}
-
-function evaluationPayload(saved) {
-  return {
-    id: saved.id,
-    technicalScore: saved.technicalScore,
-    communicationScore: saved.communicationScore,
-    depthScore: saved.depthScore,
-    structureScore: saved.structureScore,
-    starSituation: saved.starSituation,
-    starTask: saved.starTask,
-    starAction: saved.starAction,
-    starResult: saved.starResult,
-    idealAnswer: saved.idealAnswer,
-    improvedAnswer: saved.improvedAnswer,
-    conceptExplanation: saved.conceptExplanation,
-    missingPoints: saved.missingPoints,
-    topicTags: saved.topicTags,
-    studyTips: saved.studyTips,
-    feedback: saved.feedback,
-    fillerWordCount: saved.fillerWordCount,
-    wordCount: saved.wordCount,
-    speakingSeconds: saved.speakingSeconds,
-    wordsPerMinute: saved.wordsPerMinute,
-  };
-}
-
-async function generateQuestionText(args, { stream = false, onToken } = {}) {
-  try {
-    if (stream && typeof onToken === 'function') {
-      const text = await chatCompletionStream({
-        messages: buildInterviewerMessages(args),
-        temperature: 0.65,
-        onToken,
-      });
-      if (text?.trim()) return text.trim();
-    } else {
-      const text = await chatCompletion({
-        messages: buildInterviewerMessages(args),
-        temperature: 0.65,
-      });
-      if (text?.trim()) return text.trim();
-    }
-  } catch (err) {
-    console.warn('Question generation failed, using fallback:', err.message);
-  }
-
-  const weak =
-    args.practicePack === 'weak_topics' && args.focusWeakTopics?.length
-      ? args.focusWeakTopics[args.questionIndex % args.focusWeakTopics.length]
-      : null;
-
-  return fallbackQuestion({
-    mode: args.mode,
-    index: args.questionIndex,
-    weakTopic: weak,
-    interviewLanguage: args.interviewLanguage,
-  });
 }
 
 function shouldAskFollowUp({ evaluation, lastWasFollowUp, sessionComplete }) {
@@ -325,28 +307,79 @@ router.post('/start', async (req, res, next) => {
         practicePack,
         interviewLanguage,
         coveredTopics: [],
+        memory: emptyMemory({ difficulty }),
       },
     });
 
+    try {
+      await ensureCognitiveModel(session);
+    } catch (err) {
+      console.warn('[intelligence] ensure CCM on start failed:', err.message);
+    }
+
+    if (isRoleCurriculumEnabled()) {
+      try {
+        await ensurePrimaryEnrollment(userId, user.targetRole);
+      } catch (err) {
+        console.warn('[intelligence] role enrollment failed:', err.message);
+      }
+    }
+
+    let startIntelligence = null;
+    try {
+      startIntelligence = await analyzeResumeAtStart({
+        session,
+        user,
+        jdText: jdText ? String(jdText).trim() : null,
+        roleCurriculum,
+      });
+    } catch (err) {
+      console.warn('[intelligence] start analysis failed:', err.message);
+    }
+
     if (stream) writeNdjson(res, { type: 'session', sessionId: session.id, plannedCount: count });
 
-    const args = interviewerArgs({
-      session,
-      company,
-      user,
-      previousQuestions: [],
-      jdContext,
-    });
+    const masteryRows = await getKnowledgeProfile(userId, { limit: 30 });
+    const knowledgeProfile = formatKnowledgeProfile(masteryRows);
 
-    let question;
+    const startMemory = emptyMemory({ difficulty });
+
+    let questionResult;
     if (stream) {
       writeNdjson(res, { type: 'status', message: 'Interviewer is drafting your first question…' });
-      question = await generateQuestionText(args, {
+      questionResult = await generateNextQuestion({
+        session,
+        company,
+        user,
+        previousQuestions: [],
+        lastEvaluation: null,
+        memory: startMemory,
+        knowledgeProfile,
+        jdContext,
+        companyProfile: companyProfile(company),
         stream: true,
         onToken: (delta) => writeNdjson(res, { type: 'token', delta }),
       });
     } else {
-      question = await generateQuestionText(args);
+      questionResult = await generateNextQuestion({
+        session,
+        company,
+        user,
+        previousQuestions: [],
+        lastEvaluation: null,
+        memory: startMemory,
+        knowledgeProfile,
+        jdContext,
+        companyProfile: companyProfile(company),
+      });
+    }
+    const question = questionResult.question;
+
+    if (startIntelligence && questionResult.objective) {
+      startIntelligence.questionSource = questionResult.source;
+      startIntelligence.objective = questionResult.objective;
+      startIntelligence.plan = questionResult.plan;
+      startIntelligence.rationale = questionResult.objective.rationale;
     }
 
     await prisma.session.update({
@@ -363,6 +396,7 @@ router.post('/start', async (req, res, next) => {
       interviewLanguage,
       mode: resolvedMode,
       roleCurriculum: roleCurriculum || null,
+      ...(startIntelligence ? { intelligence: startIntelligence } : {}),
     };
 
     if (stream) {
@@ -474,54 +508,125 @@ router.post('/:id/answer', async (req, res, next) => {
 
     const delivery = analyzeSpeechDelivery(userAnswer, speakingSeconds);
 
-    const evaluation = await chatJson({
-      messages: buildEvaluatorMessages({
-        companyName: company.name,
-        questionText,
-        userAnswer,
-        mode: session.mode,
-        delivery,
-        interviewLanguage: session.interviewLanguage || 'english',
-      }),
-      temperature: 0.2,
+    const turn =
+      session.questions.filter((q) => !q.isFollowUp).length +
+      (isFollowUpAnswer ? 0 : 1);
+
+    const previousQuestionsForEval = session.questions.map((q) => q.questionText);
+
+    const evalResult = await evaluateAnswer({
+      session,
+      company,
+      questionText,
+      userAnswer,
+      delivery,
+      companyProfile: companyProfile(company),
+      previousQuestions: previousQuestionsForEval,
+      targetRole: session.user?.targetRole || null,
     });
+
+    const evaluation = evalResult.normalized
+      ? evalResult.normalized
+      : normalizeEvaluation(evalResult.rawEvaluation);
 
     const saved = await prisma.question.create({
       data: {
         sessionId: session.id,
         questionText,
         userAnswer,
-        idealAnswer: String(evaluation.idealAnswer || ''),
-        improvedAnswer: String(evaluation.improvedAnswer || ''),
-        conceptExplanation: String(evaluation.conceptExplanation || ''),
-        missingPoints: Array.isArray(evaluation.missingPoints)
-          ? evaluation.missingPoints.map(String)
-          : [],
-        topicTags: Array.isArray(evaluation.topicTags) ? evaluation.topicTags.map(String) : [],
-        technicalScore: clampScore(evaluation.technicalScore),
-        communicationScore: clampScore(evaluation.communicationScore),
-        depthScore: clampScore(evaluation.depthScore),
-        structureScore: clampScore(evaluation.structureScore),
-        starSituation: optionalScore(evaluation.starSituation),
-        starTask: optionalScore(evaluation.starTask),
-        starAction: optionalScore(evaluation.starAction),
-        starResult: optionalScore(evaluation.starResult),
-        fillerWordCount: delivery.fillerWordCount,
-        wordCount: delivery.wordCount,
-        speakingSeconds: delivery.speakingSeconds,
-        wordsPerMinute: delivery.wordsPerMinute,
-        isFollowUp: Boolean(isFollowUpAnswer),
-        studyTips: Array.isArray(evaluation.studyTips) ? evaluation.studyTips.map(String) : [],
-        feedback: String(evaluation.feedback || ''),
+        ...questionCreateData(evaluation, {
+          fillerWordCount: delivery.fillerWordCount,
+          wordCount: delivery.wordCount,
+          speakingSeconds: delivery.speakingSeconds,
+          wordsPerMinute: delivery.wordsPerMinute,
+          isFollowUp: Boolean(isFollowUpAnswer),
+        }),
       },
+    });
+
+    if (evalResult.source === 'v2-brain' && evalResult.brain) {
+      try {
+        const applied = await applyBrainResult({
+          session,
+          questionId: saved.id,
+          turn,
+          brain: evalResult.brain,
+        });
+        if (evalResult.intelligence) {
+          evalResult.intelligence.evidenceCount = applied.evidenceIds?.length || 0;
+          evalResult.intelligence.pendingEvidence = false;
+          evalResult.intelligence.updatedHypotheses = applied.updatedHypotheses || 0;
+          evalResult.intelligence.resolvedUncertainties =
+            applied.resolvedUncertainties || 0;
+          evalResult.intelligence.neighborhoodInfluenceCount =
+            applied.neighborhoodInfluences?.length || 0;
+          evalResult.intelligence.misconceptionCount =
+            applied.misconceptionIds?.length || 0;
+        }
+      } catch (err) {
+        console.warn('[intelligence] apply Brain result failed:', err.message);
+      }
+    } else if (evalResult.technical || evalResult.communication) {
+      try {
+        const { evidenceIds, updatedHypotheses, resolvedUncertainties, neighborhoodInfluences } =
+          await persistEvaluationEvidence({
+          session,
+          questionId: saved.id,
+          turn,
+          technical: evalResult.technical,
+          communication: evalResult.communication,
+        });
+        if (evalResult.intelligence) {
+          evalResult.intelligence.evidenceCount = evidenceIds.length;
+          evalResult.intelligence.pendingEvidence = false;
+          evalResult.intelligence.updatedHypotheses = updatedHypotheses || 0;
+          evalResult.intelligence.resolvedUncertainties = resolvedUncertainties || 0;
+          evalResult.intelligence.neighborhoodInfluenceCount =
+            neighborhoodInfluences?.length || 0;
+        }
+      } catch (err) {
+        console.warn('[intelligence] persist evidence failed:', err.message);
+      }
+
+      if (evalResult.misconceptions?.length) {
+        try {
+          const misconceptionIds = await persistMisconceptions({
+            sessionId: session.id,
+            misconceptions: evalResult.misconceptions,
+          });
+          if (evalResult.intelligence) {
+            evalResult.intelligence.misconceptionCount = misconceptionIds.length;
+          }
+        } catch (err) {
+          console.warn('[intelligence] persist misconceptions failed:', err.message);
+        }
+      }
+    }
+
+    try {
+      await applyEvaluationToKnowledge({
+        userId: session.userId,
+        questionId: saved.id,
+        evaluation,
+      });
+    } catch (err) {
+      console.warn('Knowledge graph update failed:', err.message);
+    }
+
+    const prevMemory = readMemory(session);
+    const nextMemory = updateMemoryAfterAnswer(prevMemory, {
+      questionText,
+      evaluation,
+      isFollowUp: Boolean(isFollowUpAnswer),
     });
 
     const coveredTopics = uniqueMerge(session.coveredTopics, saved.topicTags);
     await prisma.session.update({
       where: { id: session.id },
-      data: { coveredTopics },
+      data: { coveredTopics, memory: nextMemory },
     });
     session.coveredTopics = coveredTopics;
+    session.memory = nextMemory;
 
     const answeredMain =
       session.questions.filter((q) => !q.isFollowUp).length + (isFollowUpAnswer ? 0 : 1);
@@ -537,6 +642,8 @@ router.post('/:id/answer', async (req, res, next) => {
       structureScore: saved.structureScore,
       topicTags: saved.topicTags,
       missingPoints: saved.missingPoints,
+      conceptsIncorrect: saved.conceptsIncorrect,
+      conceptsPartial: saved.conceptsPartial,
       feedback: saved.feedback,
     };
 
@@ -557,41 +664,64 @@ router.post('/:id/answer', async (req, res, next) => {
         plannedCount: planned,
         sessionComplete,
         coveredTopics,
+        ...(evalResult.intelligence ? { intelligence: evalResult.intelligence } : {}),
       });
     }
+
+    const refreshedUser = await prisma.user.findUnique({ where: { id: session.userId } });
+    const masteryRows = await getKnowledgeProfile(session.userId, { limit: 30 });
+    const knowledgeProfile = formatKnowledgeProfile(masteryRows);
 
     let nextQuestion = null;
     let isFollowUp = false;
 
     if (!sessionComplete) {
-      if (wantsFollowUp) {
+      const useV2Questions = isIntelligenceV2Enabled();
+      const brainAlreadyHasNext =
+        evalResult.source === 'v2-brain' && evalResult.nextQuestion?.text;
+
+      if (brainAlreadyHasNext) {
+        nextQuestion = evalResult.nextQuestion.text;
+        isFollowUp = Boolean(
+          evalResult.nextQuestion.isFollowUp || evalResult.objective?.followUp,
+        );
+        if (stream) {
+          writeNdjson(res, { type: 'status', message: 'Preparing your next question…' });
+          writeNdjson(res, { type: 'token', delta: nextQuestion });
+        }
+      } else if (!useV2Questions && wantsFollowUp && (nextMemory.followUpBudget ?? 0) >= 0) {
         nextQuestion = String(evaluation.followUpQuestion).trim();
         isFollowUp = true;
-      } else if (stream) {
-        writeNdjson(res, { type: 'status', message: 'Preparing your next question…' });
-        nextQuestion = await generateQuestionText(
-          interviewerArgs({
-            session,
-            company,
-            user: session.user,
-            previousQuestions,
-            lastEvaluation: lastEvaluationCtx,
-          }),
-          {
-            stream: true,
-            onToken: (delta) => writeNdjson(res, { type: 'token', delta }),
-          },
-        );
       } else {
-        nextQuestion = await generateQuestionText(
-          interviewerArgs({
-            session,
-            company,
-            user: session.user,
-            previousQuestions,
-            lastEvaluation: lastEvaluationCtx,
-          }),
-        );
+        const questionArgs = {
+          session,
+          company,
+          user: refreshedUser || session.user,
+          previousQuestions,
+          lastEvaluation: lastEvaluationCtx,
+          memory: nextMemory,
+          knowledgeProfile,
+          companyProfile: companyProfile(company),
+        };
+
+        if (stream) {
+          writeNdjson(res, { type: 'status', message: 'Preparing your next question…' });
+          questionArgs.stream = true;
+          questionArgs.onToken = (delta) => writeNdjson(res, { type: 'token', delta });
+        }
+
+        const questionResult = await generateNextQuestion(questionArgs);
+        nextQuestion = questionResult.question;
+        isFollowUp = questionResult.isFollowUp;
+
+        if (evalResult.intelligence) {
+          evalResult.intelligence.questionSource = questionResult.source;
+          if (questionResult.objective) {
+            evalResult.intelligence.objective = questionResult.objective;
+            evalResult.intelligence.plan = questionResult.plan;
+            evalResult.intelligence.rationale = questionResult.objective.rationale;
+          }
+        }
       }
     }
 
@@ -601,6 +731,7 @@ router.post('/:id/answer', async (req, res, next) => {
         currentQuestion: sessionComplete ? null : nextQuestion,
         currentIsFollowUp: Boolean(isFollowUp),
         coveredTopics,
+        memory: nextMemory,
       },
     });
 
@@ -612,6 +743,8 @@ router.post('/:id/answer', async (req, res, next) => {
       plannedCount: planned,
       coveredTopics,
       lastEvaluation: lastEvalPayload,
+      memory: nextMemory,
+      ...(evalResult.intelligence ? { intelligence: evalResult.intelligence } : {}),
     };
 
     if (stream) {
@@ -650,27 +783,16 @@ router.post('/:id/finish', async (req, res, next) => {
 
     const overallScore = averageScores(session.questions);
 
-    const weakFromSession = [];
-    const strongFromSession = [];
-    for (const q of session.questions) {
-      if (q.technicalScore < 6) weakFromSession.push(...q.topicTags);
-      if (q.technicalScore >= 8) strongFromSession.push(...q.topicTags);
-    }
-
-    const weakTopics = uniqueMerge(session.user.weakTopics, weakFromSession);
-    const strongTopics = uniqueMerge(session.user.strongTopics, strongFromSession);
-
-    const verdict = await chatJson({
-      messages: buildVerdictMessages({
-        companyName: company.name,
-        questions: session.questions,
-        interviewLanguage: session.interviewLanguage || 'english',
-      }),
-      temperature: 0.3,
+    const reportResult = await generateSessionReport({
+      session,
+      company,
+      questions: session.questions,
+      overallScore,
     });
 
-    const hiringVerdict = String(verdict.hiringVerdict || 'Leaning No Hire');
-    const reasoning = String(verdict.reasoning || '');
+    const verdict = reportResult.verdict;
+    const hiringVerdict = verdict.hiringVerdict;
+    const reasoning = verdict.reasoning;
 
     const shareToken = session.shareToken || makeShareToken();
 
@@ -706,7 +828,9 @@ router.post('/:id/finish', async (req, res, next) => {
       };
     }
 
-    const [updatedSession, updatedUser] = await prisma.$transaction([
+    const reportAnalysis = reportResult.reportAnalysis;
+
+    const [updatedSession] = await prisma.$transaction([
       prisma.session.update({
         where: { id: session.id },
         data: {
@@ -715,24 +839,73 @@ router.post('/:id/finish', async (req, res, next) => {
           shareToken,
           currentQuestion: null,
           currentIsFollowUp: false,
+          hireProbability: verdict.hireProbability,
+          readinessScore: verdict.readinessScore,
+          strengths: verdict.strengths,
+          weaknesses: verdict.weaknesses,
+          repeatedMistakes: verdict.repeatedMistakes,
+          recommendedPath: verdict.recommendedLearningPath,
+          verdictReasoning: reasoning,
+          reportAnalysis,
         },
         include: { questions: { orderBy: { createdAt: 'asc' } } },
       }),
-      prisma.user.update({
-        where: { id: session.userId },
-        data: { weakTopics, strongTopics },
-      }),
     ]);
+
+    const { weakTopics, strongTopics } = await syncUserTopicCaches(session.userId);
+
+    let studyPlan = null;
+    try {
+      studyPlan = await generateStudyPlan({
+        userId: session.userId,
+        session: { ...updatedSession, user: session.user },
+        company,
+        verdict,
+        questions: updatedSession.questions,
+        intelligenceReport: reportResult.reportAnalysis,
+      });
+    } catch (err) {
+      console.warn('Study plan generation failed:', err.message);
+    }
+
+    try {
+      const avgComm =
+        updatedSession.questions.length > 0
+          ? updatedSession.questions.reduce((s, q) => s + q.communicationScore, 0) /
+            updatedSession.questions.length
+          : null;
+      await createProgressSnapshot(session.userId, {
+        accuracy: overallScore,
+        communication: avgComm,
+        readiness: verdict.readinessScore,
+      });
+    } catch (err) {
+      console.warn('Progress snapshot failed:', err.message);
+    }
 
     res.json({
       session: updatedSession,
       hiringVerdict,
       reasoning,
       overallScore,
-      weakTopics: updatedUser.weakTopics,
-      strongTopics: updatedUser.strongTopics,
+      hireProbability: verdict.hireProbability,
+      readinessScore: verdict.readinessScore,
+      strengths: verdict.strengths,
+      weaknesses: verdict.weaknesses,
+      repeatedMistakes: verdict.repeatedMistakes,
+      missedConcepts: verdict.missedConcepts,
+      recommendedLearningPath: verdict.recommendedLearningPath,
+      confidenceAnalysis: verdict.confidenceAnalysis,
+      communicationAnalysis: verdict.communicationAnalysis,
+      technicalAnalysis: verdict.technicalAnalysis,
+      bestAnswerQ: verdict.bestAnswerQ,
+      worstAnswerQ: verdict.worstAnswerQ,
+      weakTopics,
+      strongTopics,
       shareUrl: `/r/${shareToken}`,
       comparison,
+      studyPlan,
+      ...(reportResult.intelligence ? { intelligence: reportResult.intelligence } : {}),
     });
   } catch (err) {
     next(err);
@@ -757,6 +930,178 @@ router.post('/:id/share', async (req, res, next) => {
     }
 
     res.json({ shareToken, shareUrl: `/r/${shareToken}` });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * Read-only CCM projection for the intelligence UI.
+ * GET /session/:id/cognitive-model
+ */
+router.get('/:id/cognitive-model', async (req, res, next) => {
+  try {
+    const session = await prisma.session.findUnique({
+      where: { id: req.params.id },
+      select: {
+        id: true,
+        userId: true,
+        difficulty: true,
+        memory: true,
+        hiringVerdict: true,
+        reportAnalysis: true,
+      },
+    });
+    if (!session) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+    if (session.userId !== req.userId) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    const model = await loadCognitiveModel(session);
+    const dimensions = model.dimensions || {};
+    const dimensionList = Object.entries(dimensions).map(([key, belief]) => ({
+      key,
+      score: belief?.score ?? null,
+      confidence: belief?.confidence ?? 0,
+      verification: belief?.verification || 'unverified',
+      trend: belief?.trend || 'unknown',
+      lastUpdatedTurn: belief?.lastUpdatedTurn ?? 0,
+    }));
+
+    const concepts = (model.concepts || []).map((c) => ({
+      conceptSlug: c.conceptSlug,
+      score: c.knowledge?.score ?? null,
+      confidence: c.knowledge?.confidence ?? 0,
+      verification: c.knowledge?.verification || 'unverified',
+      status: c.status || 'unknown',
+      neighborhoodInfluence: c.neighborhoodInfluence ?? 0,
+      timesProbed: c.timesProbed ?? 0,
+    }));
+
+    const reportAnalysis =
+      session.reportAnalysis && typeof session.reportAnalysis === 'object'
+        ? session.reportAnalysis
+        : null;
+
+    res.json({
+      sessionId: session.id,
+      enabled: isIntelligenceV2Enabled(),
+      source: model.meta?.source || 'unknown',
+      dimensions: dimensionList,
+      concepts,
+      growth: model.growth ?? null,
+      dimensionReport: reportAnalysis?.dimensionReport || [],
+      misconceptions: reportAnalysis?.misconceptions || [],
+      intelligenceSource: reportAnalysis?.intelligenceSource || null,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * Hypotheses + linked evidence chains for the intelligence UI.
+ * GET /session/:id/hypotheses
+ */
+router.get('/:id/hypotheses', async (req, res, next) => {
+  try {
+    const session = await prisma.session.findUnique({
+      where: { id: req.params.id },
+      select: { id: true, userId: true, reportAnalysis: true },
+    });
+    if (!session) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+    if (session.userId !== req.userId) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    const [hypotheses, evidence, misconceptions, resumeClaims] = await Promise.all([
+      prisma.hypothesis.findMany({
+        where: { sessionId: session.id },
+        orderBy: [{ priority: 'desc' }, { createdAt: 'asc' }],
+      }),
+      prisma.evidence.findMany({
+        where: { sessionId: session.id },
+        orderBy: [{ turn: 'asc' }, { createdAt: 'asc' }],
+      }),
+      prisma.misconception.findMany({
+        where: { sessionId: session.id },
+        orderBy: { createdAt: 'asc' },
+      }),
+      prisma.resumeClaim.findMany({
+        where: { sessionId: session.id },
+        orderBy: { createdAt: 'asc' },
+        take: 20,
+      }),
+    ]);
+
+    const evidenceByHypothesis = new Map();
+    const unlinkedEvidence = [];
+    for (const e of evidence) {
+      const item = {
+        id: e.id,
+        turn: e.turn,
+        source: e.source,
+        observation: e.observation,
+        dimension: e.dimension,
+        conceptSlugs: e.conceptSlugs,
+        polarity: e.polarity,
+        strength: e.strength,
+        confidence: e.confidence,
+        hypothesisId: e.hypothesisId,
+      };
+      if (e.hypothesisId) {
+        const list = evidenceByHypothesis.get(e.hypothesisId) || [];
+        list.push(item);
+        evidenceByHypothesis.set(e.hypothesisId, list);
+      } else {
+        unlinkedEvidence.push(item);
+      }
+    }
+
+    const reportAnalysis =
+      session.reportAnalysis && typeof session.reportAnalysis === 'object'
+        ? session.reportAnalysis
+        : null;
+
+    res.json({
+      sessionId: session.id,
+      enabled: isIntelligenceV2Enabled(),
+      hypotheses: hypotheses.map((h) => ({
+        id: h.id,
+        statement: h.statement,
+        conceptSlugs: h.conceptSlugs,
+        origin: h.origin,
+        status: h.status,
+        confidence: h.confidence,
+        priority: h.priority,
+        createdTurn: h.createdTurn,
+        lastTestedTurn: h.lastTestedTurn,
+        evidence: evidenceByHypothesis.get(h.id) || [],
+      })),
+      misconceptions: misconceptions.map((m) => ({
+        id: m.id,
+        conceptSlug: m.conceptSlug,
+        statement: m.statement,
+        correctStatement: m.correctStatement,
+        status: m.status,
+        candidateConfidence: m.candidateConfidence,
+        ourConfidence: m.ourConfidence,
+      })),
+      resumeClaims: resumeClaims.map((c) => ({
+        id: c.id,
+        claim: c.claim,
+        conceptSlugs: c.conceptSlugs,
+        importance: c.importance,
+        verification: c.verification,
+      })),
+      resolvedHypotheses: reportAnalysis?.resolvedHypotheses || [],
+      unlinkedEvidenceCount: unlinkedEvidence.length,
+      evidenceCount: evidence.length,
+    });
   } catch (err) {
     next(err);
   }

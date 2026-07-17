@@ -1,6 +1,11 @@
 import { Router } from 'express';
 import multer from 'multer';
 import { requireAuth } from '../auth.js';
+import {
+  formatInterviewerSpeech,
+  orpheusDirectionTags,
+} from '../speechFormatter.js';
+import { concatWavBuffers } from '../wavConcat.js';
 
 const router = Router();
 const upload = multer({
@@ -10,7 +15,7 @@ const upload = multer({
 
 router.use(requireAuth);
 
-const ORPHEUS_MAX_CHARS = 180; // Groq Orpheus limit is 200; leave room for direction tags
+const ORPHEUS_HARD_LIMIT = 200;
 
 function getLlmConfig() {
   const apiKey = process.env.LLM_API_KEY;
@@ -21,16 +26,19 @@ function getLlmConfig() {
   return { apiKey, baseUrl };
 }
 
-/** Split text into Orpheus-sized chunks at sentence / clause boundaries. */
-function chunkForTts(text) {
+/**
+ * Split spoken text into Orpheus-safe pieces. Never drops characters.
+ * maxChars should already account for any prefix (direction tags).
+ */
+function chunkForTts(text, maxChars = 170) {
   const clean = String(text || '').replace(/\s+/g, ' ').trim();
   if (!clean) return [];
-  if (clean.length <= ORPHEUS_MAX_CHARS) return [clean];
+  if (clean.length <= maxChars) return [clean];
 
   const parts = [];
   let remaining = clean;
-  while (remaining.length > ORPHEUS_MAX_CHARS) {
-    let slice = remaining.slice(0, ORPHEUS_MAX_CHARS);
+  while (remaining.length > maxChars) {
+    let slice = remaining.slice(0, maxChars);
     const breakAt = Math.max(
       slice.lastIndexOf('. '),
       slice.lastIndexOf('? '),
@@ -41,39 +49,55 @@ function chunkForTts(text) {
       slice.lastIndexOf(' - '),
       slice.lastIndexOf(' '),
     );
-    if (breakAt > 40) slice = slice.slice(0, breakAt + 1);
-    parts.push(slice.trim());
+    // Prefer a natural break, but never skip the start of remaining.
+    if (breakAt >= 24) {
+      slice = slice.slice(0, breakAt + 1);
+    }
+    const piece = slice.trim();
+    if (!piece) {
+      // Safety: force progress if whitespace/punctuation edge case.
+      parts.push(remaining.slice(0, maxChars).trim());
+      remaining = remaining.slice(maxChars).trim();
+      continue;
+    }
+    parts.push(piece);
     remaining = remaining.slice(slice.length).trim();
   }
   if (remaining) parts.push(remaining);
   return parts.filter(Boolean);
 }
 
-function prepareSpokenText(text, language) {
-  const lang = String(language || 'english').toLowerCase();
-  let body = String(text || '').trim();
-  if (!body) return '';
+/**
+ * Build Orpheus inputs: keep FULL spoken text, prefix tags only when they fit.
+ * Critical: never slice(0, 200) after tagging — that used to erase the opening.
+ */
+function buildOrpheusInputs(spokenText, language) {
+  const directions = orpheusDirectionTags(language);
+  const tagPrefix = `${directions} `;
+  // Leave room for tags on every chunk so each call stays under 200.
+  const bodyBudget = Math.max(80, ORPHEUS_HARD_LIMIT - tagPrefix.length);
+  const bodies = chunkForTts(spokenText, bodyBudget);
 
-  body = body
-    .replace(/[*_`#]+/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-
-  // Vocal directions make Orpheus sound like a person, not a reader.
-  if (lang === 'hinglish') {
-    return `[warm][friendly] ${body}`;
-  }
-  if (lang === 'hindi') {
-    return `[warm][calm] ${body}`;
-  }
-  return `[warm][conversational] ${body}`;
+  return bodies.map((body) => {
+    const withTags = `${tagPrefix}${body}`;
+    if (withTags.length <= ORPHEUS_HARD_LIMIT) return withTags;
+    // Should never happen with bodyBudget, but fail safe without dropping head of text.
+    return body.slice(0, ORPHEUS_HARD_LIMIT);
+  });
 }
 
 function mostlyLatin(text) {
   const chars = String(text || '').replace(/\s/g, '');
   if (!chars.length) return true;
   const latin = (chars.match(/[A-Za-z0-9.,!?;:'"()\-]/g) || []).length;
-  return latin / chars.length >= 0.55;
+  return latin / chars.length >= 0.45;
+}
+
+function stripDevanagariToLatinHint(text) {
+  return String(text || '')
+    .replace(/[\u0900-\u097F]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 async function synthesizeChunk({ apiKey, baseUrl, model, voice, input }) {
@@ -104,8 +128,81 @@ async function synthesizeChunk({ apiKey, baseUrl, model, voice, input }) {
     throw error;
   }
 
-  const buffer = Buffer.from(await response.arrayBuffer());
-  return buffer.toString('base64');
+  return Buffer.from(await response.arrayBuffer());
+}
+
+async function synthesizeEmmaSpeech({ text, language, kind = 'question', formatSpeech = true }) {
+  const cfg = getLlmConfig();
+  if (!cfg) {
+    const err = new Error('LLM_API_KEY is required for AI voice');
+    err.status = 500;
+    throw err;
+  }
+
+  const lang = String(language || 'english').toLowerCase();
+  const formatted = formatSpeech
+    ? formatInterviewerSpeech(text, { language: lang, kind })
+    : {
+        spokenText: String(text || '').trim(),
+        sentences: [],
+        persona: 'Emma',
+        language: lang,
+      };
+
+  let spoken = formatted.spokenText;
+  if (!spoken) {
+    const err = new Error('text is required');
+    err.status = 400;
+    throw err;
+  }
+
+  if (!mostlyLatin(spoken)) {
+    spoken = stripDevanagariToLatinHint(spoken);
+    if (!spoken) {
+      const err = new Error(
+        'Emma voice needs Latin script for Hindi/Hinglish delivery. Rephrase or use Hinglish mode.',
+      );
+      err.status = 422;
+      throw err;
+    }
+  }
+
+  // Keep Emma speech as complete as possible (no hard mid-cut of the question).
+  if (spoken.length > 900) {
+    spoken = `${spoken.slice(0, 900).replace(/\s+\S*$/, '')}.`;
+    formatted.spokenText = spoken;
+    formatted.sentences = spoken
+      .split(/(?<=[.?!])\s+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+  }
+
+  const model = process.env.VOICE_TTS_MODEL || 'canopylabs/orpheus-v1-english';
+  const voice = process.env.VOICE_TTS_VOICE || 'hannah';
+  const inputs = buildOrpheusInputs(spoken, lang);
+
+  const wavChunks = [];
+  for (const input of inputs) {
+    const buf = await synthesizeChunk({
+      apiKey: cfg.apiKey,
+      baseUrl: cfg.baseUrl,
+      model,
+      voice,
+      input,
+    });
+    wavChunks.push(buf);
+  }
+
+  const audio = concatWavBuffers(wavChunks);
+  return {
+    audio,
+    chunks: wavChunks,
+    formatted,
+    voice,
+    model,
+    provider: 'groq-orpheus',
+    persona: 'Emma',
+  };
 }
 
 router.post('/transcribe', upload.single('audio'), async (req, res, next) => {
@@ -181,60 +278,74 @@ router.post('/transcribe', upload.single('audio'), async (req, res, next) => {
 });
 
 /**
- * Neural AI interviewer voice (Groq Orpheus) — sounds like a person, not browser TTS.
- * Female voice default: hannah (also autumn / diana)
+ * Preferred TTS endpoint for Emma (Groq Orpheus).
+ * Returns audio/wav binary. Optional ?meta=1 returns JSON with base64 + spoken script.
+ */
+router.post('/tts', async (req, res, next) => {
+  try {
+    const text = String(req.body?.text || '').trim();
+    const language = String(req.body?.language || 'english').toLowerCase();
+    const kind = String(req.body?.kind || 'question').toLowerCase();
+    const wantMeta = req.query?.meta === '1' || req.body?.meta === true;
+
+    const result = await synthesizeEmmaSpeech({
+      text,
+      language,
+      kind: kind === 'feedback' ? 'feedback' : 'question',
+      formatSpeech: req.body?.format !== false,
+    });
+
+    if (wantMeta) {
+      return res.json({
+        format: 'wav',
+        voice: result.voice,
+        model: result.model,
+        provider: result.provider,
+        persona: result.persona,
+        spokenText: result.formatted.spokenText,
+        sentences: result.formatted.sentences,
+        // Prefer sequential chunks on the client (avoids broken WAV merges skipping the start).
+        chunks: (result.chunks || []).map((buf) => Buffer.from(buf).toString('base64')),
+        audioBase64: result.audio.toString('base64'),
+      });
+    }
+
+    res.setHeader('Content-Type', 'audio/wav');
+    res.setHeader('X-Voice-Persona', 'Emma');
+    res.setHeader('X-Voice-Provider', 'groq-orpheus');
+    res.setHeader('X-Spoken-Text', encodeURIComponent(result.formatted.spokenText.slice(0, 400)));
+    return res.send(result.audio);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * Legacy JSON chunks endpoint — still uses Emma formatter + Orpheus.
  */
 router.post('/speak', async (req, res, next) => {
   try {
-    const cfg = getLlmConfig();
-    if (!cfg) {
-      return res.status(500).json({ error: 'LLM_API_KEY is required for AI voice' });
-    }
-
     const text = String(req.body?.text || '').trim();
     const language = String(req.body?.language || 'english').toLowerCase();
-    if (!text) {
-      return res.status(400).json({ error: 'text is required' });
-    }
+    const kind = String(req.body?.kind || 'question').toLowerCase();
 
-    if (language === 'hindi' && !mostlyLatin(text)) {
-      return res.status(422).json({
-        error: 'AI voice is English/Hinglish optimized. Use browser voice for Hindi script.',
-        fallback: 'browser',
-      });
-    }
-
-    const model = process.env.VOICE_TTS_MODEL || 'canopylabs/orpheus-v1-english';
-    const voice = process.env.VOICE_TTS_VOICE || 'hannah';
-
-    const prepared = prepareSpokenText(text, language);
-    const directionMatch = prepared.match(/^(\[[^\]]+\]\s*)+/);
-    const directions = directionMatch ? directionMatch[0] : '';
-    const bodyOnly = directions ? prepared.slice(directions.length).trim() : prepared;
-    const rawChunks = chunkForTts(bodyOnly);
-    const inputs = rawChunks.map((chunk, i) => {
-      const withDir = i === 0 && directions ? `${directions}${chunk}` : chunk;
-      return withDir.length > 200 ? withDir.slice(0, 200) : withDir;
+    const result = await synthesizeEmmaSpeech({
+      text,
+      language,
+      kind: kind === 'feedback' ? 'feedback' : 'question',
+      formatSpeech: req.body?.format !== false,
     });
-
-    const audioChunks = [];
-    for (const input of inputs) {
-      const b64 = await synthesizeChunk({
-        apiKey: cfg.apiKey,
-        baseUrl: cfg.baseUrl,
-        model,
-        voice,
-        input,
-      });
-      audioChunks.push(b64);
-    }
 
     res.json({
       format: 'wav',
-      voice,
-      model,
-      chunks: audioChunks,
-      provider: 'groq-orpheus',
+      voice: result.voice,
+      model: result.model,
+      provider: result.provider,
+      persona: result.persona,
+      spokenText: result.formatted.spokenText,
+      sentences: result.formatted.sentences,
+      chunks: (result.chunks || []).map((buf) => Buffer.from(buf).toString('base64')),
+      audioBase64: result.audio.toString('base64'),
     });
   } catch (err) {
     next(err);

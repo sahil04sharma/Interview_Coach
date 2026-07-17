@@ -138,6 +138,13 @@ export const api = {
     return request('/user/me/resume-pdf', { method: 'POST', body: form });
   },
   getStats: () => request('/user/me/stats'),
+  getKnowledge: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return request(`/knowledge${qs ? `?${qs}` : ''}`);
+  },
+  getKnowledgeConcept: (slug) => request(`/knowledge/${encodeURIComponent(slug)}`),
+  getStudyPlan: () => request('/study-plan'),
+  getStudyPlanById: (id) => request(`/study-plan/${id}`),
   getCompanyStyles: () => request('/company-styles'),
   listSessions: () => request('/session'),
   startSession: (body, { onEvent } = {}) =>
@@ -156,6 +163,8 @@ export const api = {
   finishSession: (sessionId) =>
     request(`/session/${sessionId}/finish`, { method: 'POST' }),
   getSession: (sessionId) => request(`/session/${sessionId}`),
+  getCognitiveModel: (sessionId) => request(`/session/${sessionId}/cognitive-model`),
+  getHypotheses: (sessionId) => request(`/session/${sessionId}/hypotheses`),
   runCode: (body) =>
     request('/code/run', { method: 'POST', body: JSON.stringify(body) }),
   transcribeAudio: (blob, language = 'english') => {

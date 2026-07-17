@@ -76,12 +76,14 @@ export default function Setup() {
 
   if (loading) return <Loading label="Loading your profile…" />;
 
+  const charCount = resumeText.length;
+
   return (
-    <Page>
+    <Page className="!space-y-3 lg:flex lg:h-[calc(100dvh-11.5rem)] lg:min-h-0 lg:flex-col">
       <PageHeader
         eyebrow="Profile"
         title="Set the stage"
-        subtitle="Your resume and role shape every question. Keep this updated so practice stays personal."
+        subtitle="Role and resume shape every round. Keep them current."
         action={
           <Link to="/session/new">
             <Button>Start practice</Button>
@@ -89,12 +91,23 @@ export default function Setup() {
         }
       />
 
-      <Panel className="animate-rise-delay space-y-5">
-        <form onSubmit={onSave} className="space-y-4">
+      <form
+        onSubmit={onSave}
+        className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(260px,300px)_minmax(0,1fr)] lg:items-stretch"
+      >
+        <Panel className="flex flex-col gap-4">
           <Field label="Name">
-            <input className="field-input" value={name} onChange={(e) => setName(e.target.value)} />
+            <input
+              className="field-input"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              autoComplete="name"
+            />
           </Field>
-          <Field label="Target role" hint="Used to build a wide interview topic map (e.g. Frontend Developer → JS, React, CSS, browser, a11y, performance, trick questions).">
+          <Field
+            label="Target role"
+            hint="e.g. MERN stack developer — drives fundamentals & curriculum."
+          >
             <input
               className="field-input"
               placeholder="e.g. Frontend Developer"
@@ -102,29 +115,52 @@ export default function Setup() {
               onChange={(e) => setTargetRole(e.target.value)}
             />
           </Field>
-          <Field label="Resume" hint="Paste text, or upload a PDF below.">
-            <textarea
-              className="field-input min-h-64 font-mono text-[13px] leading-relaxed"
-              value={resumeText}
-              onChange={(e) => setResumeText(e.target.value)}
-              placeholder="Paste your resume here…"
-            />
-          </Field>
 
-          <div className="flex flex-wrap items-center gap-3">
-            <Button type="submit" disabled={saving}>
-              {saving ? 'Saving…' : 'Save profile'}
-            </Button>
-            <label className="btn-ghost inline-flex cursor-pointer items-center rounded-xl px-4 py-2.5 text-sm font-semibold">
-              {uploading ? 'Reading PDF…' : 'Upload PDF'}
-              <input type="file" accept="application/pdf" className="hidden" onChange={onPdf} disabled={uploading} />
-            </label>
+          <div className="mt-auto space-y-3 border-t border-[var(--color-line)] pt-4">
+            <div className="flex flex-wrap gap-2">
+              <Button type="submit" disabled={saving} className="flex-1 sm:flex-none">
+                {saving ? 'Saving…' : 'Save profile'}
+              </Button>
+              <label className="btn-ghost inline-flex flex-1 cursor-pointer items-center justify-center rounded-[12px] px-4 py-2.5 text-sm font-semibold sm:flex-none">
+                {uploading ? 'Reading PDF…' : 'Upload PDF'}
+                <input
+                  type="file"
+                  accept="application/pdf"
+                  className="hidden"
+                  onChange={onPdf}
+                  disabled={uploading}
+                />
+              </label>
+            </div>
+            {message && <Alert tone="ok">{message}</Alert>}
+            {error && <Alert>{error}</Alert>}
+            <p className="text-xs leading-relaxed text-[var(--color-muted)]">
+              Tip: a clear target role helps more than a long resume when you are switching domains.
+            </p>
           </div>
-        </form>
+        </Panel>
 
-        {message && <Alert tone="ok">{message}</Alert>}
-        {error && <Alert>{error}</Alert>}
-      </Panel>
+        <Panel className="flex min-h-[16rem] flex-col gap-2 overflow-hidden lg:min-h-0 lg:h-full">
+          <div className="flex shrink-0 items-end justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-[var(--color-ink)]">Resume</p>
+              <p className="mt-0.5 text-xs text-[var(--color-muted)]">
+                Paste text or upload a PDF. Scroll inside this panel if needed.
+              </p>
+            </div>
+            <p className="shrink-0 text-xs tabular-nums text-[var(--color-faint)]">
+              {charCount.toLocaleString()} chars
+            </p>
+          </div>
+          <textarea
+            className="field-input min-h-[14rem] flex-1 resize-none overflow-y-auto font-mono text-[13px] leading-relaxed lg:min-h-0"
+            value={resumeText}
+            onChange={(e) => setResumeText(e.target.value)}
+            placeholder="Paste your resume here…"
+            spellCheck={false}
+          />
+        </Panel>
+      </form>
     </Page>
   );
 }

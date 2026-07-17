@@ -48,31 +48,6 @@ export default function Dashboard() {
         }
       />
 
-      {resumable && (
-        <Panel className="border-[color-mix(in_srgb,var(--color-amber)_45%,var(--color-line))]">
-          <p className="text-sm font-semibold">Resume unfinished rehearsal</p>
-          <p className="mt-1 text-sm text-[var(--color-muted)]">
-            You have an in-progress {resumable.mode} round ({resumable.questionCount}/
-            {resumable.plannedCount || '?'} answered).
-          </p>
-          <Link to={`/session/${resumable.id}`} className="mt-3 inline-block">
-            <Button>Continue interview</Button>
-          </Link>
-        </Panel>
-      )}
-
-      {needsSetup && (
-        <Panel className="border-[color-mix(in_srgb,var(--color-amber)_45%,var(--color-line))]">
-          <p className="text-sm font-semibold">Finish onboarding</p>
-          <p className="mt-1 text-sm text-[var(--color-muted)]">
-            Add your resume and target role so questions match what you are actually applying for.
-          </p>
-          <Link to="/setup" className="mt-3 inline-block">
-            <Button variant="ghost">Complete setup</Button>
-          </Link>
-        </Panel>
-      )}
-
       {error && <Alert>{error}</Alert>}
 
       <div className="grid gap-4 sm:grid-cols-3">
@@ -99,16 +74,44 @@ export default function Dashboard() {
         </Panel>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Panel>
-          <h2 className="font-display text-xl font-semibold">Quick actions</h2>
-          <div className="mt-4 flex flex-col gap-2">
-            <Link to="/session/new"><Button className="w-full">New interview round</Button></Link>
-            <Link to="/progress"><Button variant="ghost" className="w-full">View progress</Button></Link>
-            <Link to="/history"><Button variant="ghost" className="w-full">Session history</Button></Link>
-            <Link to="/settings"><Button variant="ghost" className="w-full">Settings</Button></Link>
-          </div>
-        </Panel>
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.15fr)] lg:items-start">
+        <div className="space-y-4">
+          {resumable && (
+            <Panel className="border-[color-mix(in_srgb,var(--color-amber)_45%,var(--color-line))]">
+              <p className="text-sm font-semibold">Resume unfinished rehearsal</p>
+              <p className="mt-1 text-sm text-[var(--color-muted)]">
+                You have an in-progress {resumable.mode} round ({resumable.questionCount}/
+                {resumable.plannedCount || '?'} answered).
+              </p>
+              <Link to={`/session/${resumable.id}`} className="mt-3 inline-block">
+                <Button>Continue interview</Button>
+              </Link>
+            </Panel>
+          )}
+
+          {needsSetup && (
+            <Panel className="border-[color-mix(in_srgb,var(--color-amber)_45%,var(--color-line))]">
+              <p className="text-sm font-semibold">Finish onboarding</p>
+              <p className="mt-1 text-sm text-[var(--color-muted)]">
+                Add your resume and target role so questions match what you are actually applying for.
+              </p>
+              <Link to="/setup" className="mt-3 inline-block">
+                <Button variant="ghost">Complete setup</Button>
+              </Link>
+            </Panel>
+          )}
+
+          <Panel>
+            <h2 className="font-display text-xl font-semibold">Quick actions</h2>
+            <div className="mt-4 flex flex-col gap-2">
+              <Link to="/session/new"><Button className="w-full">New interview round</Button></Link>
+              <Link to="/progress"><Button variant="ghost" className="w-full">View progress</Button></Link>
+              <Link to="/history"><Button variant="ghost" className="w-full">Session history</Button></Link>
+              <Link to="/settings"><Button variant="ghost" className="w-full">Settings</Button></Link>
+            </div>
+          </Panel>
+        </div>
+
         <Panel>
           <h2 className="font-display text-xl font-semibold">Recent sessions</h2>
           <div className="mt-4 space-y-3">
@@ -116,7 +119,7 @@ export default function Dashboard() {
               <p className="text-sm text-[var(--color-muted)]">Empty booth. Start your first rehearsal.</p>
             )}
             {sessions.map((s) => (
-              <div key={s.id} className="flex items-center justify-between gap-3 text-sm">
+              <div key={s.id} className="flex items-center justify-between gap-3 border-b border-[var(--color-line)] pb-3 text-sm last:border-0 last:pb-0">
                 <div>
                   <p className="font-medium capitalize">
                     {s.companyStyle} · {s.mode}

@@ -95,6 +95,9 @@ export function buildInterviewerMessages({
   lastEvaluation = null,
   coveredTopics = [],
   focusWeakTopics = null,
+  memory = null,
+  knowledgeProfile = null,
+  companyProfile = null,
 }) {
   if (forcedFollowUp) {
     return [
@@ -174,6 +177,7 @@ export function buildInterviewerMessages({
 - Scores: technical=${lastEvaluation.technicalScore}, communication=${lastEvaluation.communicationScore}, depth=${lastEvaluation.depthScore}, structure=${lastEvaluation.structureScore} (avg ~${avg.toFixed(1)})
 - Topics just covered: ${(lastEvaluation.topicTags || []).join(', ') || '(none)'}
 - Missing points: ${(lastEvaluation.missingPoints || []).join('; ') || '(none)'}
+- Concepts incorrect/partial: ${[...(lastEvaluation.conceptsIncorrect || []), ...(lastEvaluation.conceptsPartial || [])].join(', ') || '(none)'}
 - Prior feedback summary: ${lastEvaluation.feedback || '(none)'}
 Adaptive rules:
 - If avg < 5: either gently re-probe the SAME weak topic with a simpler angle, OR switch to a closely related fundamental they need.
@@ -181,20 +185,57 @@ Adaptive rules:
 - If avg > 7.5: stretch them with a harder adjacent topic; do not repeat the same easy ground.`;
   }
 
-  const covered = (coveredTopics || []).filter(Boolean);
+  const covered = (coveredTopics || memory?.topicsCovered || []).filter(Boolean);
   const coveredBlock = covered.length
     ? `Topics already covered this session (avoid repeating these narrowly):\n${covered.join(', ')}`
     : 'Topics already covered this session: (none yet)';
 
-  const focusWeak = (focusWeakTopics || weakTopics || []).filter(Boolean);
+  const focusWeak = (focusWeakTopics || weakTopics || memory?.weakTopics || []).filter(Boolean);
   const weakFocusBlock =
     practicePack === 'weak_topics'
       ? `FOCUS WEAK TOPICS FOR THIS SESSION (must pick from these): ${focusWeak.join(', ') || '(none listed — use general fundamentals)'}`
       : '';
 
+  const companyWeightBlock = companyProfile
+    ? `Company mode weights (bias question selection):
+- Philosophy: ${companyProfile.philosophy || '(see style notes)'}
+- Difficulty default: ${companyProfile.difficulty || difficulty}
+- Follow-up aggressiveness: ${companyProfile.followUpAggressiveness || 'medium'}
+- Behavioral weight: ${companyProfile.behavioralWeight ?? 3}/5
+- Coding weight: ${companyProfile.codingWeight ?? 3}/5
+- System design weight: ${companyProfile.systemDesignWeight ?? 3}/5
+- Communication expectations: ${companyProfile.communicationExpect || ''}
+- Preferred answer style: ${companyProfile.preferredAnswerStyle || ''}`
+    : '';
+
+  const memoryBlock = memory
+    ? `INTERVIEW MEMORY (maintain continuity — do NOT ask isolated questions):
+- Adaptive difficulty: ${memory.difficulty || difficulty}
+- Confidence: ${memory.confidenceLevel ?? 'n/a'}
+- Communication quality: ${memory.communicationQuality ?? 'n/a'}
+- Depth quality: ${memory.depthQuality ?? 'n/a'}
+- Session weak topics: ${(memory.weakTopics || []).join(', ') || '(none)'}
+- Session strong topics: ${(memory.strongTopics || []).join(', ') || '(none)'}
+- Repeated mistakes: ${(memory.repeatedMistakes || []).join('; ') || '(none)'}
+- Knowledge gaps: ${(memory.knowledgeGaps || []).slice(0, 10).join('; ') || '(none)'}
+- Incorrect concepts: ${(memory.conceptsIncorrect || []).join(', ') || '(none)'}
+- Partial concepts: ${(memory.conceptsPartial || []).join(', ') || '(none)'}
+- Question types used: ${(memory.questionTypesUsed || []).join(', ') || '(none)'}
+- Resume claims verified: ${(memory.resumeClaimsVerified || []).join(', ') || '(none yet)'}
+- Follow-up budget remaining: ${memory.followUpBudget ?? 0}
+- Last scores: ${memory.lastScores ? JSON.stringify(memory.lastScores) : '(none)'}`
+    : '';
+
+  const knowledgeBlock = knowledgeProfile
+    ? `CROSS-SESSION KNOWLEDGE PROFILE:
+${knowledgeProfile.summary || '(none)'}
+- Prioritize weak/learning concepts and frequently failed concepts when choosing the next angle.`
+    : '';
+
   const userPrompt = `${framing}
 
 ${styleHeader}
+${companyWeightBlock}
 
 ${roleLine}
 Interview mode: ${mode}
@@ -216,6 +257,10 @@ ${weakFocusBlock}
 
 ${coveredBlock}
 
+${memoryBlock}
+
+${knowledgeBlock}
+
 ${adaptiveBlock}
 
 Previous questions asked this session:
@@ -224,11 +269,12 @@ ${previous}
 This question's required intent: ${intent}
 
 Rules:
-- Ask ONE question only.
-- Cover variety across the session: role fundamentals, real-world scenarios, trick/edge questions, and some resume-based probes — NOT resume-only (unless practice pack forces otherwise).
+- Ask ONE question only. Conduct a continuous interview, not isolated quiz items.
+- Cover variety across the session: role fundamentals, real-world scenarios, trick/edge questions, resume verification, debugging, production incidents, architecture/trade-offs — match mode and company weights.
 - Prefer curriculum topics that are NOT in the covered list yet.
+- Challenge weak areas and verify resume claims that are still unverified.
 - Sound like a real interviewer speaking naturally.
-- Match difficulty and mode.
+- Match difficulty (including memory adaptive difficulty) and mode.
 - Do not repeat previous questions or the same narrow topic.
 - Output ONLY the question text (and brief setup if needed), nothing else.`;
 
@@ -312,6 +358,17 @@ Scoring philosophy:
   5) a short "how to remember this in an interview" tip.
   Write 8-14 sentences. Assume the candidate may be a beginner on this exact question. Same interview language style.
 - studyTips = 1-3 short actionable practice tips tied to weak spots (same language style).
+- accuracyScore = factual/technical correctness (align with technicalScore).
+- problemSolvingScore = how they approached the problem and trade-offs.
+- practicalScore / practicalExperience = evidence of real experience vs textbook.
+- productionThinking = ops, failure modes, monitoring, real-world constraints.
+- confidenceScore = how assured and crisp the answer sounded (not bluffing).
+- conceptsCorrect / conceptsPartial / conceptsIncorrect = specific concept names (e.g. "TTL", "eviction"), not just broad tags.
+- knowledgeGaps = what they still need to learn at concept level.
+- learningPriority = high|medium|low for studying this topic next.
+- estimatedRevisionMinutes = integer minutes to revise this gap (10-90 typical).
+- questionType = one of: resume-discussion, technical, behavioral, coding-theory, debugging, production-incident, architecture, trade-offs, system-design, database, api-design, security, scalability, cloud, leadership.
+- difficultyLevel = easy|medium|hard for this question.
 - needsFollowUp = true ONLY when a real interviewer would ask one clarifying follow-up — typically when the answer is partially solid but incomplete (roughly mid scores), NOT when they clearly nailed it or completely missed it.
 - followUpQuestion = the exact follow-up to ask if needsFollowUp is true (same language style), else "".
 
@@ -322,6 +379,11 @@ Respond ONLY in this JSON format:
   "communicationScore": 0-10,
   "depthScore": 0-10,
   "structureScore": 0-10,
+  "accuracyScore": 0-10,
+  "problemSolvingScore": 0-10,
+  "practicalScore": 0-10,
+  "productionThinking": 0-10,
+  "confidenceScore": 0-10,
   "starSituation": 0-10 or null,
   "starTask": 0-10 or null,
   "starAction": 0-10 or null,
@@ -331,6 +393,14 @@ Respond ONLY in this JSON format:
   "conceptExplanation": "detailed beginner-friendly teaching explanation with a concrete example, 8-14 sentences",
   "missingPoints": ["important substance gap"],
   "topicTags": ["topic1", "topic2"],
+  "conceptsCorrect": ["concept"],
+  "conceptsPartial": ["concept"],
+  "conceptsIncorrect": ["concept"],
+  "knowledgeGaps": ["gap"],
+  "learningPriority": "high|medium|low",
+  "estimatedRevisionMinutes": 30,
+  "questionType": "technical",
+  "difficultyLevel": "medium",
   "studyTips": ["tip1", "tip2"],
   "feedback": "1-2 sentence direct feedback on understanding and delivery",
   "needsFollowUp": false,
@@ -375,8 +445,105 @@ Give a final verdict in this JSON format:
 
 {
   "hiringVerdict": "Strong Hire | Hire | Leaning Hire | Leaning No Hire | No Hire",
-  "reasoning": "2-3 sentences explaining the verdict, citing real substance strengths/weaknesses — not vocabulary or language purity"
+  "hireProbability": 0-100,
+  "reasoning": "2-3 sentences explaining the verdict, citing real substance strengths/weaknesses — not vocabulary or language purity",
+  "strengths": ["strength1"],
+  "weaknesses": ["weakness1"],
+  "repeatedMistakes": ["pattern noticed more than once"],
+  "missedConcepts": ["concept they lacked"],
+  "bestAnswerQ": "short label or snippet of best answer",
+  "worstAnswerQ": "short label or snippet of weakest answer",
+  "confidenceAnalysis": "1-2 sentences on confidence patterns",
+  "communicationAnalysis": "1-2 sentences on clarity and structure",
+  "technicalAnalysis": "1-2 sentences on technical correctness and depth",
+  "recommendedLearningPath": "2-4 sentences describing what to study next and why",
+  "estimatedInterviewReadiness": 0-10
 }`;
+
+  return [{ role: 'user', content: userPrompt }];
+}
+
+export function buildStudyPlanMessages({
+  companyName,
+  questions,
+  verdict,
+  weakConcepts = [],
+  interviewLanguage = 'english',
+  targetRole,
+  intelligenceReport = null,
+}) {
+  const lang = languageGuide(interviewLanguage);
+  const gaps = (questions || [])
+    .flatMap((q) => [
+      ...(q.knowledgeGaps || []),
+      ...(q.missingPoints || []),
+      ...(q.conceptsIncorrect || []),
+    ])
+    .filter(Boolean)
+    .slice(0, 20);
+
+  const tips = (questions || []).flatMap((q) => q.studyTips || []).slice(0, 12);
+
+  const userPrompt = `You are an interview coach building tomorrow's personalized study plan for a software engineer.
+Target role: ${targetRole || 'software engineer'}
+Company style context: ${companyName || 'general'}
+
+Session verdict summary:
+${JSON.stringify(
+  {
+    hiringVerdict: verdict?.hiringVerdict,
+    hireProbability: verdict?.hireProbability,
+    readiness: verdict?.estimatedInterviewReadiness,
+    recommendedLearningPath: verdict?.recommendedLearningPath,
+    weaknesses: verdict?.weaknesses,
+    missedConcepts: verdict?.missedConcepts,
+    repeatedMistakes: verdict?.repeatedMistakes,
+  },
+  null,
+  2,
+)}
+
+Weak concept mastery:
+${JSON.stringify(weakConcepts, null, 2)}
+
+Knowledge gaps / missing points from this session:
+${gaps.join('; ') || '(none)'}
+
+Existing study tips from evaluations:
+${tips.join('; ') || '(none)'}
+
+${intelligenceReport?.dimensionReport?.length ? `Explainable dimension narratives (prioritize weak areas):
+${JSON.stringify(intelligenceReport.dimensionReport, null, 2)}` : ''}
+
+${intelligenceReport?.misconceptions?.length ? `Confirmed/suspected misconceptions to address:
+${JSON.stringify(intelligenceReport.misconceptions, null, 2)}` : ''}
+
+${lang.verdict}
+
+Return ONLY JSON:
+{
+  "title": "Tomorrow's Study Plan",
+  "summary": "2-3 sentence overview of the plan",
+  "estimatedMinutes": 45,
+  "items": [
+    {
+      "priority": 1,
+      "concept": "concept name",
+      "slug": "optional-slug-if-known",
+      "estimatedMinutes": 20,
+      "explanation": "short teaching note / what to understand",
+      "practiceQuestions": ["question to practice out loud", "another"],
+      "retryInterviewAngle": "how this may appear in a real interview",
+      "revisionNotes": "what they got wrong previously"
+    }
+  ]
+}
+
+Rules:
+- 3-6 prioritized items.
+- Prefer concrete concept-level items (e.g. TTL, eviction) over vague topics.
+- Total estimatedMinutes should be realistic for one focused study day (30-120).
+- Practice questions must be say-out-loud interview style.`;
 
   return [{ role: 'user', content: userPrompt }];
 }

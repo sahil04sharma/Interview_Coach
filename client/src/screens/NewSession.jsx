@@ -150,75 +150,65 @@ export default function NewSession() {
         subtitle="Professional-style rounds: fixed length, difficulty, practice packs, STAR coaching, speech delivery, and adaptive follow-ups — like top AI interview tools."
       />
 
-      {user && (
-        <div className="animate-rise-delay grid gap-4 sm:grid-cols-2">
-          <Panel>
-            <TopicCloud title="Weak topics" topics={user.weakTopics} empty="None yet — they’ll appear after tough answers." />
-          </Panel>
-          <Panel>
-            <TopicCloud title="Strong topics" topics={user.strongTopics} empty="None yet." tone="strong" />
-          </Panel>
-        </div>
-      )}
-
-      <Panel>
-        <form onSubmit={onStart} className="space-y-4">
-          <Field
-            label="Focus"
-            hint="Leave on General for all-around growth. Company options tune tone for that target."
-          >
-            <select
-              className="field-input"
-              value={companyStyle}
-              onChange={(e) => setCompanyStyle(e.target.value)}
-              required
-            >
-              {styles.map((s) => (
-                <option key={s.id} value={s.name}>
-                  {styleLabel(s.name)}
-                </option>
-              ))}
-            </select>
-          </Field>
-
-          <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1.25fr)_minmax(260px,0.75fr)] lg:items-start">
+        <Panel>
+          <form onSubmit={onStart} className="space-y-4">
             <Field
-              label="Practice pack"
-              hint={
-                practicePack === 'weak_topics'
-                  ? user?.weakTopics?.length
-                    ? `Will drill: ${user.weakTopics.slice(0, 4).join(', ')}${user.weakTopics.length > 4 ? '…' : ''}`
-                    : 'Needs weak topics from past sessions first.'
-                  : undefined
-              }
+              label="Focus"
+              hint="Leave on General for all-around growth. Company options tune tone for that target."
             >
-              <select className="field-input" value={practicePack} onChange={(e) => setPracticePack(e.target.value)}>
-                {PACKS.map((p) => (
-                  <option
-                    key={p.value}
-                    value={p.value}
-                    disabled={p.value === 'weak_topics' && !user?.weakTopics?.length}
-                  >
-                    {p.label}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Mode">
               <select
                 className="field-input"
-                value={mode}
-                onChange={(e) => setMode(e.target.value)}
-                disabled={practicePack === 'behavioral_star'}
+                value={companyStyle}
+                onChange={(e) => setCompanyStyle(e.target.value)}
+                required
               >
-                {MODES.map((m) => (
-                  <option key={m.value} value={m.value}>
-                    {m.label}
+                {styles.map((s) => (
+                  <option key={s.id} value={s.name}>
+                    {styleLabel(s.name)}
                   </option>
                 ))}
               </select>
             </Field>
-          </div>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field
+                label="Practice pack"
+                hint={
+                  practicePack === 'weak_topics'
+                    ? user?.weakTopics?.length
+                      ? `Will drill: ${user.weakTopics.slice(0, 4).join(', ')}${user.weakTopics.length > 4 ? '…' : ''}`
+                      : 'Needs weak topics from past sessions first.'
+                    : undefined
+                }
+              >
+                <select className="field-input" value={practicePack} onChange={(e) => setPracticePack(e.target.value)}>
+                  {PACKS.map((p) => (
+                    <option
+                      key={p.value}
+                      value={p.value}
+                      disabled={p.value === 'weak_topics' && !user?.weakTopics?.length}
+                    >
+                      {p.label}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Mode">
+                <select
+                  className="field-input"
+                  value={mode}
+                  onChange={(e) => setMode(e.target.value)}
+                  disabled={practicePack === 'behavioral_star'}
+                >
+                  {MODES.map((m) => (
+                    <option key={m.value} value={m.value}>
+                      {m.label}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            </div>
 
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Difficulty">
@@ -275,7 +265,7 @@ export default function NewSession() {
                 Voice-to-voice interview
               </span>
               <span className="mt-0.5 block text-xs text-[var(--color-muted)]">
-                Soft girl interviewer voice + recorded answers with filler/pace analytics.
+                Soft AI interviewer (Emma) + recorded answers with filler/pace analytics.
               </span>
             </span>
           </label>
@@ -299,6 +289,30 @@ export default function NewSession() {
         </form>
         {error && <div className="mt-4"><Alert>{error}</Alert></div>}
       </Panel>
+
+      <aside className="space-y-4 lg:sticky lg:top-6">
+        {user ? (
+          <>
+            <Panel>
+              <TopicCloud
+                title="Weak topics"
+                topics={user.weakTopics}
+                empty="None yet — they’ll appear after tough answers."
+              />
+            </Panel>
+            <Panel>
+              <TopicCloud title="Strong topics" topics={user.strongTopics} empty="None yet." tone="strong" />
+            </Panel>
+          </>
+        ) : (
+          <Panel>
+            <p className="text-sm text-[var(--color-muted)]">
+              Your weak and strong topics will show here once you have practice history.
+            </p>
+          </Panel>
+        )}
+      </aside>
+      </div>
     </Page>
   );
 }

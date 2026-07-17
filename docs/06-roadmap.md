@@ -1,30 +1,37 @@
 # 06 — Roadmap & Out of Scope
 
-## Explicitly Out of Scope for v1
+## Phase 1 foundation (shipped)
 
-- Voice interviews
-- Video/camera analysis
+- Concept-level knowledge graph (`Concept`, `UserConceptMastery`, `QuestionConcept`)
+- Session Interview Memory (JSON on `Session.memory`) driving adaptive next questions
+- Richer evaluator dimensions + hire probability / readiness on finish
+- Study plan generation + Knowledge Base / Study Plan screens
+- Structured company modes (weights + philosophy)
+- Warm-light Inter-based UI
+
+## Intelligence V2 (design complete)
+
+The multi-agent reasoning architecture is now fully designed under
+[`intelligence-v2/`](intelligence-v2/00-index.md) — cognitive model, 8 specialist
+agents, hypothesis/evidence engine, concept-graph edges, prompts/schemas, additive
+DB/APIs, orchestration, and a phased roadmap. This supersedes the "multi-agent
+deferred" note below **for planning purposes only** (still no code shipped yet).
+
+## Explicitly deferred
+
+- Dark mode
+- Video / camera analysis
 - GitHub/LinkedIn/portfolio analyzers
-- Multi-agent architecture (one interviewer + one evaluator prompt is enough)
-- Dashboards / analytics trends over time
-- Multi-user auth
-- Coding round with code execution (mode is selectable; questions stay text-based)
+- Multi-agent architecture (now designed in `intelligence-v2/`, implementation pending)
+- Chart libraries / heavy analytics dashboards
+- Payment / billing flows
+- Full repository-pattern rewrite of every route
 
-## Future Work (post-MVP)
+## Future work
 
-1. **Auth + multi-user** — replace hardcoded user with real accounts.
-2. **PDF resume parsing** — upload PDF instead of pasting plain text.
-3. **Coding mode with execution** — sandboxed runner for code answers.
-4. **Trends dashboard** — weak/strong topic progress over time.
-5. **Voice mode** — speech-to-text answers, TTS questions.
-6. **Prompt tuning per company** — richer, versioned style notes.
-7. **Export** — download session report as PDF/Markdown.
-
-## Build Order (tracked in the plan todos)
-
-1. Scaffold `client/` + `server/`, docker-compose, env examples.
-2. Prisma schema, migrate, seed user + company styles.
-3. LLM adapter + prompts.
-4. Express routes.
-5. React screens wired to the API.
-6. End-to-end smoke test with a real API key.
+1. Spaced-repetition scheduling on study plan items
+2. Richer concept edges (`prerequisite` / `related`) beyond parent tree
+3. Dark mode toggle
+4. Coding mode with sandboxed execution polish
+5. Prompt versioning per company style
+6. Export study plans as PDF/Markdown

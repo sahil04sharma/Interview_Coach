@@ -8,40 +8,60 @@ datasource db {
 }
 
 model User {
-  id                String    @id @default(uuid())
-  email             String    @unique
+  id                String               @id @default(uuid())
+  email             String               @unique
   passwordHash      String
   name              String
-  resumeText        String    @default("")
+  resumeText        String               @default("")
   targetRole        String?
-  preferredLanguage String    @default("hinglish")
-  plan              String    @default("free")
-  weakTopics        String[]  @default([])
-  strongTopics      String[]  @default([])
+  preferredLanguage String               @default("hinglish")
+  plan              String               @default("free")
+  weakTopics        String[]             @default([])
+  strongTopics      String[]             @default([])
   sessions          Session[]
-  createdAt         DateTime  @default(now())
+  masteries         UserConceptMastery[]
+  studyPlans        StudyPlan[]
+  snapshots         ProgressSnapshot[]
+  roleEnrollments   UserRoleEnrollment[]
+  createdAt         DateTime             @default(now())
 }
 
 model Session {
-  id               String     @id @default(uuid())
-  userId           String
-  user             User       @relation(fields: [userId], references: [id])
-  companyStyle     String
-  jdText           String?
-  mode             String
-  roleCurriculum   String?
-  plannedCount     Int        @default(8)
-  difficulty       String     @default("medium")
-  practicePack     String?
-  interviewLanguage String    @default("english")
-  coveredTopics    String[]   @default([])
-  currentQuestion  String?
-  currentIsFollowUp Boolean   @default(false)
-  questions        Question[]
-  overallScore     Float?
-  hiringVerdict    String?
-  shareToken       String?    @unique
-  createdAt        DateTime   @default(now())
+  id                String     @id @default(uuid())
+  userId            String
+  user              User       @relation(fields: [userId], references: [id])
+  companyStyle      String
+  jdText            String?
+  mode              String
+  roleCurriculum    String?
+  plannedCount      Int        @default(8)
+  difficulty        String     @default("medium")
+  practicePack      String?
+  interviewLanguage String     @default("english")
+  coveredTopics     String[]   @default([])
+  currentQuestion   String?
+  currentIsFollowUp Boolean    @default(false)
+  questions         Question[]
+  overallScore      Float?
+  hiringVerdict     String?
+  memory            Json?
+  hireProbability   Float?
+  readinessScore    Float?
+  strengths         String[]   @default([])
+  weaknesses        String[]   @default([])
+  repeatedMistakes  String[]   @default([])
+  recommendedPath   String?
+  verdictReasoning  String     @default("")
+  reportAnalysis    Json?
+  shareToken        String?    @unique
+  createdAt         DateTime   @default(now())
+
+  cognitiveModel CognitiveModel?
+  hypotheses     Hypothesis[]
+  evidence       Evidence[]
+  misconceptions Misconception[]
+  resumeClaims   ResumeClaim[]
+  uncertainties  Uncertainty[]
 }
 
 model CurriculumCache {
@@ -53,36 +73,339 @@ model CurriculumCache {
 }
 
 model Question {
-  id                 String   @id @default(uuid())
-  sessionId          String
-  session            Session  @relation(fields: [sessionId], references: [id])
-  questionText       String
-  userAnswer         String
-  idealAnswer        String
-  improvedAnswer     String   @default("")
-  missingPoints      String[]
-  topicTags          String[]
-  technicalScore     Float
-  communicationScore Float
-  depthScore         Float
-  structureScore     Float
-  starSituation      Float?
-  starTask           Float?
-  starAction         Float?
-  starResult         Float?
-  fillerWordCount    Int?
-  wordCount          Int?
-  speakingSeconds    Float?
-  wordsPerMinute     Float?
-  isFollowUp         Boolean  @default(false)
-  feedback           String
-  studyTips          String[] @default([])
-  conceptExplanation String    @default("")
-  createdAt          DateTime @default(now())
+  id                       String            @id @default(uuid())
+  sessionId                String
+  session                  Session           @relation(fields: [sessionId], references: [id])
+  questionText             String
+  userAnswer               String
+  idealAnswer              String
+  improvedAnswer           String            @default("")
+  missingPoints            String[]
+  topicTags                String[]
+  technicalScore           Float
+  communicationScore       Float
+  depthScore               Float
+  structureScore           Float
+  starSituation            Float?
+  starTask                 Float?
+  starAction               Float?
+  starResult               Float?
+  fillerWordCount          Int?
+  wordCount                Int?
+  speakingSeconds          Float?
+  wordsPerMinute           Float?
+  isFollowUp               Boolean           @default(false)
+  feedback                 String
+  studyTips                String[]          @default([])
+  conceptExplanation       String            @default("")
+  accuracyScore            Float?
+  problemSolvingScore      Float?
+  practicalScore           Float?
+  productionThinking       Float?
+  confidenceScore          Float?
+  conceptsCorrect          String[]          @default([])
+  conceptsPartial          String[]          @default([])
+  conceptsIncorrect        String[]          @default([])
+  knowledgeGaps            String[]          @default([])
+  learningPriority         String            @default("medium")
+  estimatedRevisionMinutes Int               @default(0)
+  questionType             String            @default("technical")
+  difficultyLevel          String            @default("medium")
+  conceptLinks             QuestionConcept[]
+  createdAt                DateTime          @default(now())
 }
 
 model CompanyStyle {
-  id         String @id @default(uuid())
-  name       String @unique
-  styleNotes String
+  id                     String @id @default(uuid())
+  name                   String @unique
+  styleNotes             String
+  philosophy             String @default("")
+  difficulty             String @default("medium")
+  followUpAggressiveness String @default("medium")
+  behavioralWeight       Int    @default(3)
+  codingWeight           Int    @default(3)
+  systemDesignWeight     Int    @default(3)
+  communicationExpect    String @default("clear and structured")
+  preferredAnswerStyle   String @default("structured, specific, and honest about trade-offs")
+}
+
+model Concept {
+  id            String               @id @default(uuid())
+  slug          String               @unique
+  name          String
+  domain        String               @default("general")
+  description   String               @default("")
+  parentId      String?
+  parent        Concept?             @relation("ConceptTree", fields: [parentId], references: [id])
+  children      Concept[]            @relation("ConceptTree")
+  masteries     UserConceptMastery[]
+  questionLinks QuestionConcept[]
+  roleLinks     RoleCompetencyConcept[]
+  createdAt     DateTime             @default(now())
+
+  @@index([parentId])
+  @@index([domain])
+}
+
+model UserConceptMastery {
+  id                 String    @id @default(uuid())
+  userId             String
+  user               User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conceptId          String
+  concept            Concept   @relation(fields: [conceptId], references: [id], onDelete: Cascade)
+  masteryScore       Float     @default(0)
+  confidence         Float     @default(0)
+  attempts           Int       @default(0)
+  correctCount       Int       @default(0)
+  partialCount       Int       @default(0)
+  incorrectCount     Int       @default(0)
+  status             String    @default("not_started")
+  repeatedMistakes   String[]  @default([])
+  difficultyReached  String?
+  evidenceCount      Int       @default(0)
+  lastEvidenceAt     DateTime?
+  nextReviewAt       DateTime?
+  reviewIntervalDays Float?
+  misconceptionNotes String[]  @default([])
+  lastSeenAt         DateTime  @default(now())
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@unique([userId, conceptId])
+  @@index([userId])
+  @@index([nextReviewAt])
+}
+
+model QuestionConcept {
+  id         String   @id @default(uuid())
+  questionId String
+  question   Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  conceptId  String
+  concept    Concept  @relation(fields: [conceptId], references: [id], onDelete: Cascade)
+  status     String   @default("partial")
+  score      Float    @default(0)
+  createdAt  DateTime @default(now())
+
+  @@index([conceptId])
+  @@index([questionId])
+}
+
+model StudyPlan {
+  id               String   @id @default(uuid())
+  userId           String
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sessionId        String?
+  title            String
+  summary          String   @default("")
+  estimatedMinutes Int      @default(0)
+  readinessScore   Float?
+  items            Json
+  status           String   @default("active")
+  forDate          DateTime @default(now())
+  createdAt        DateTime @default(now())
+
+  @@index([userId])
+}
+
+model ProgressSnapshot {
+  id            String   @id @default(uuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accuracy      Float?
+  communication Float?
+  readiness     Float?
+  weakCount     Int      @default(0)
+  strongCount   Int      @default(0)
+  createdAt     DateTime @default(now())
+
+  @@index([userId])
+}
+
+// ---- Intelligence V2 (additive; see docs/intelligence-v2/08-database-and-apis.md) ----
+
+model CognitiveModel {
+  id          String   @id @default(uuid())
+  sessionId   String   @unique
+  session     Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  userId      String
+  dimensions  Json
+  concepts    Json     @default("[]")
+  impressions Json     @default("[]")
+  signals     Json?
+  growth      Json?
+  updatedAt   DateTime @updatedAt
+  createdAt   DateTime @default(now())
+
+  @@index([userId])
+}
+
+model Hypothesis {
+  id             String   @id @default(uuid())
+  sessionId      String
+  session        Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  statement      String
+  conceptSlugs   String[] @default([])
+  origin         String
+  status         String   @default("open")
+  confidence     Float    @default(0.5)
+  priority       Float    @default(0.5)
+  createdTurn    Int      @default(0)
+  lastTestedTurn Int?
+  createdAt      DateTime @default(now())
+
+  @@index([sessionId])
+}
+
+model Evidence {
+  id           String   @id @default(uuid())
+  sessionId    String
+  session      Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  questionId   String?
+  turn         Int      @default(0)
+  source       String
+  observation  String
+  dimension    String?
+  conceptSlugs String[] @default([])
+  polarity     String   @default("neutral")
+  strength     Float    @default(0.5)
+  confidence   Float    @default(0.5)
+  alternatives String[] @default([])
+  hypothesisId String?
+  createdAt    DateTime @default(now())
+
+  @@index([sessionId])
+  @@index([questionId])
+  @@index([hypothesisId])
+}
+
+model Misconception {
+  id                  String   @id @default(uuid())
+  sessionId           String
+  session             Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  conceptSlug         String
+  statement           String
+  correctStatement    String   @default("")
+  candidateConfidence Float    @default(0.5)
+  ourConfidence       Float    @default(0.5)
+  status              String   @default("suspected")
+  createdAt           DateTime @default(now())
+
+  @@index([sessionId])
+}
+
+model ResumeClaim {
+  id           String   @id @default(uuid())
+  sessionId    String
+  session      Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  claim        String
+  conceptSlugs String[] @default([])
+  importance   String   @default("medium")
+  verification String   @default("unverified")
+  createdAt    DateTime @default(now())
+
+  @@index([sessionId])
+}
+
+model Uncertainty {
+  id                 String   @id @default(uuid())
+  sessionId          String
+  session            Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  about              String
+  conceptSlugs       String[] @default([])
+  linkedHypothesisId String?
+  priority           Float    @default(0.5)
+  status             String   @default("open")
+  createdAt          DateTime @default(now())
+
+  @@index([sessionId])
+}
+
+model ConceptEdge {
+  id       String @id @default(uuid())
+  fromSlug String
+  toSlug   String
+  type     String
+  weight   Float  @default(0.5)
+
+  @@unique([fromSlug, toSlug, type])
+  @@index([fromSlug])
+  @@index([toSlug])
+}
+
+// ---- Lifelong Role Curriculum (see docs/future-concerns/03-lifelong-role-curriculum.md) ----
+
+model RoleCurriculum {
+  id            String               @id @default(uuid())
+  roleSlug      String               @unique
+  displayName   String
+  version       Int                  @default(1)
+  status        String               @default("active")
+  summary       String               @default("")
+  source        String               @default("seed")
+  competencies  RoleCompetency[]
+  enrollments   UserRoleEnrollment[]
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+}
+
+model RoleCompetency {
+  id             String                  @id @default(uuid())
+  curriculumId   String
+  curriculum     RoleCurriculum          @relation(fields: [curriculumId], references: [id], onDelete: Cascade)
+  slug           String
+  name           String
+  description    String                  @default("")
+  importance     Float                   @default(0.5)
+  coverageTarget Float                   @default(0.8)
+  sortOrder      Int                     @default(0)
+  concepts       RoleCompetencyConcept[]
+  createdAt      DateTime                @default(now())
+
+  @@unique([curriculumId, slug])
+  @@index([curriculumId])
+}
+
+model RoleCompetencyConcept {
+  id             String         @id @default(uuid())
+  competencyId   String
+  competency     RoleCompetency @relation(fields: [competencyId], references: [id], onDelete: Cascade)
+  conceptId      String
+  concept        Concept        @relation(fields: [conceptId], references: [id], onDelete: Cascade)
+  difficultyBand String         @default("medium")
+  sortOrder      Int            @default(0)
+  isCore         Boolean        @default(true)
+
+  @@unique([competencyId, conceptId])
+  @@index([competencyId])
+  @@index([conceptId])
+}
+
+model UserRoleEnrollment {
+  id                         String         @id @default(uuid())
+  userId                     String
+  user                       User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  curriculumId               String
+  curriculum                 RoleCurriculum @relation(fields: [curriculumId], references: [id], onDelete: Cascade)
+  isPrimary                  Boolean        @default(true)
+  coveragePct                Float          @default(0)
+  velocity                   String         @default("unknown")
+  estimatedSessionsRemaining Int?
+  startedAt                  DateTime       @default(now())
+  updatedAt                  DateTime       @updatedAt
+
+  @@unique([userId, curriculumId])
+  @@index([userId])
+}
+
+model CurriculumProposal {
+  id           String   @id @default(uuid())
+  roleSlug     String
+  proposalType String
+  payload      Json
+  status       String   @default("pending")
+  evidenceNote String   @default("")
+  createdAt    DateTime @default(now())
+
+  @@index([roleSlug])
+  @@index([status])
 }

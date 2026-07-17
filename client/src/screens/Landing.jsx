@@ -6,7 +6,7 @@ const BEATS = [
   {
     step: '01',
     title: 'Speak',
-    body: 'Answer one question at a time, out loud, in English, Hinglish, or Hindi — with a soft interviewer voice and live transcription.',
+    body: 'Answer one question at a time, out loud, in English, Hinglish, or Hindi — with Emma, a natural AI interviewer voice, and live transcription.',
   },
   {
     step: '02',
